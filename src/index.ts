@@ -60,6 +60,10 @@ function authenticate(req: Request): jwt.JwtPayload | null {
   }
 }
 
+const IdParamSchema = v.object({
+  id: v.pipe(v.string(), v.regex(/^\d+$/)),
+});
+
 const app = express();
 app.use(express.json());
 
@@ -301,6 +305,12 @@ const UpdateOrganisationSchema = v.object({
 });
 
 app.put('/organisations/:id', async (req: Request, res: Response) => {
+  const paramResult = v.safeParse(IdParamSchema, req.params);
+  if (!paramResult.success) {
+    res.status(400).json({ error: 'invalid id' });
+    return;
+  }
+
   const payload = authenticate(req);
   if (!payload) {
     res.status(401).json({ error: 'missing or invalid token' });
@@ -341,6 +351,12 @@ app.put('/organisations/:id', async (req: Request, res: Response) => {
 });
 
 app.delete('/organisations/:id', async (req: Request, res: Response) => {
+  const paramResult = v.safeParse(IdParamSchema, req.params);
+  if (!paramResult.success) {
+    res.status(400).json({ error: 'invalid id' });
+    return;
+  }
+
   const payload = authenticate(req);
   if (!payload) {
     res.status(401).json({ error: 'missing or invalid token' });
@@ -366,9 +382,28 @@ app.delete('/organisations/:id', async (req: Request, res: Response) => {
 
 // --- organisers ---
 
+const OrganiserParamSchema = v.object({
+  organisationId: v.pipe(v.string(), v.regex(/^\d+$/)),
+});
+
+const AssignOrganiserSchema = v.object({
+  humanId: v.number(),
+});
+
+const UnassignOrganiserParamSchema = v.object({
+  organisationId: v.pipe(v.string(), v.regex(/^\d+$/)),
+  humanId: v.pipe(v.string(), v.regex(/^\d+$/)),
+});
+
 app.post(
   '/organisations/:organisationId/organisers',
   async (req: Request, res: Response) => {
+    const paramResult = v.safeParse(OrganiserParamSchema, req.params);
+    if (!paramResult.success) {
+      res.status(400).json({ error: 'invalid organisationId' });
+      return;
+    }
+
     const payload = authenticate(req);
     if (!payload) {
       res.status(401).json({ error: 'missing or invalid token' });
@@ -379,13 +414,14 @@ app.post(
       return;
     }
 
-    const { organisationId } = req.params;
-    const { humanId } = req.body as { humanId?: number };
-
-    if (!humanId) {
-      res.status(400).json({ error: 'humanId is required' });
+    const result = v.safeParse(AssignOrganiserSchema, req.body);
+    if (!result.success) {
+      res.status(400).json({ error: result.issues[0]!.message });
       return;
     }
+
+    const { organisationId } = req.params;
+    const { humanId } = result.output;
 
     const orgCheck = await pool.query(
       'SELECT id FROM organisations WHERE id = $1',
@@ -427,6 +463,12 @@ app.post(
 app.delete(
   '/organisations/:organisationId/organisers/:humanId',
   async (req: Request, res: Response) => {
+    const paramResult = v.safeParse(UnassignOrganiserParamSchema, req.params);
+    if (!paramResult.success) {
+      res.status(400).json({ error: 'invalid organisationId or humanId' });
+      return;
+    }
+
     const payload = authenticate(req);
     if (!payload) {
       res.status(401).json({ error: 'missing or invalid token' });
@@ -568,6 +610,12 @@ app.get('/events', async (req: Request, res: Response) => {
 });
 
 app.get('/events/:id', async (req: Request, res: Response) => {
+  const paramResult = v.safeParse(IdParamSchema, req.params);
+  if (!paramResult.success) {
+    res.status(400).json({ error: 'invalid id' });
+    return;
+  }
+
   const row = await pool.query(
     `SELECT id, human_id AS "humanId", organisation_id AS "organisationId", title, description, latitude, longitude, start_date AS "startDate", end_date AS "endDate", created_at AS "createdAt"
      FROM events WHERE id = $1`,
@@ -593,6 +641,12 @@ const UpdateEventSchema = v.object({
 });
 
 app.put('/events/:id', async (req: Request, res: Response) => {
+  const paramResult = v.safeParse(IdParamSchema, req.params);
+  if (!paramResult.success) {
+    res.status(400).json({ error: 'invalid id' });
+    return;
+  }
+
   const payload = authenticate(req);
   if (!payload) {
     res.status(401).json({ error: 'missing or invalid token' });
@@ -664,6 +718,12 @@ app.put('/events/:id', async (req: Request, res: Response) => {
 });
 
 app.delete('/events/:id', async (req: Request, res: Response) => {
+  const paramResult = v.safeParse(IdParamSchema, req.params);
+  if (!paramResult.success) {
+    res.status(400).json({ error: 'invalid id' });
+    return;
+  }
+
   const row = await pool.query(
     'DELETE FROM events WHERE id = $1 RETURNING id',
     [req.params.id],
