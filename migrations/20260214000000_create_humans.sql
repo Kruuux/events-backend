@@ -1,0 +1,9 @@
+CREATE TABLE humans (
+  id SERIAL PRIMARY KEY,
+  nickname VARCHAR(32) UNIQUE NOT NULL,
+  email VARCHAR(254) UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  salt TEXT NOT NULL,
+  role VARCHAR(16) NOT NULL DEFAULT 'member',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

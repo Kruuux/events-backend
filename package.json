@@ -4,8 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "start:http": "tsc -p tsconfig.build.json && node dist/interface/http/index.js",
+    "dev": "docker compose up --build",
+    "dev:down": "docker compose down",
+    "dev:reset": "docker compose down -v && docker compose up --build",
     "test": "tsc && node --test",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
@@ -16,7 +17,8 @@
     "type": "git",
     "url": "git+https://github.com/Kruuux/events-backend.git"
   },
-  "author": "",
+  "type": "module",
+  "author": "Kruuux",
   "license": "ISC",
   "bugs": {
     "url": "https://github.com/Kruuux/events-backend/issues"
@@ -24,10 +26,20 @@
   "homepage": "https://github.com/Kruuux/events-backend#readme",
   "devDependencies": {
     "@eslint/js": "^9.39.2",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^25.0.10",
+    "@types/pg": "^8.16.0",
     "eslint": "^9.39.2",
     "prettier": "^3.8.1",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.53.1"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.18.0",
+    "valibot": "^1.2.0"
   }
 }

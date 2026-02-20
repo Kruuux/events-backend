@@ -1,0 +1,586 @@
+openapi: 3.1.0
+info:
+  title: Events API
+  version: 1.0.0
+
+paths:
+  /join:
+    post:
+      summary: Create an account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nickname, email, password, role]
+              properties:
+                nickname:
+                  type: string
+                  minLength: 2
+                  maxLength: 32
+                email:
+                  type: string
+                  format: email
+                  maxLength: 254
+                password:
+                  type: string
+                  minLength: 8
+                  maxLength: 128
+                role:
+                  type: string
+                  enum: [admin, member]
+      responses:
+        "201":
+          description: Account created
+        "400":
+          description: Validation error
+        "409":
+          description: Email or nickname already taken
+
+  /enter:
+    post:
+      summary: Log in
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+      responses:
+        "200":
+          description: Tokens returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken:
+                    type: string
+                  refreshToken:
+                    type: string
+        "400":
+          description: Validation error
+        "401":
+          description: Invalid credentials
+
+  /refresh:
+    post:
+      summary: Refresh tokens
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken:
+                  type: string
+      responses:
+        "200":
+          description: New token pair returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken:
+                    type: string
+                  refreshToken:
+                    type: string
+        "400":
+          description: Validation error
+        "401":
+          description: Invalid or expired refresh token
+
+  /logout-all:
+    post:
+      summary: End all sessions
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: All sessions ended
+        "401":
+          description: Missing or invalid token
+
+  /organisations:
+    post:
+      summary: Create organisation (admin only)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 256
+      responses:
+        "201":
+          description: Organisation created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  humanId:
+                    type: integer
+                  name:
+                    type: string
+                  createdAt:
+                    type: string
+                    format: date-time
+        "400":
+          description: Validation error
+        "401":
+          description: Missing or invalid token
+        "403":
+          description: Admin only
+        "409":
+          description: Name already taken
+
+    get:
+      summary: List organisations
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        "200":
+          description: Paginated list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                        humanId:
+                          type: integer
+                        name:
+                          type: string
+                        createdAt:
+                          type: string
+                          format: date-time
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  limit:
+                    type: integer
+
+  /organisations/{id}:
+    put:
+      summary: Update organisation (admin only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 256
+      responses:
+        "200":
+          description: Organisation updated
+        "400":
+          description: Validation error
+        "401":
+          description: Missing or invalid token
+        "403":
+          description: Admin only
+        "404":
+          description: Organisation not found
+        "409":
+          description: Name already taken
+
+    delete:
+      summary: Delete organisation (admin only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Organisation deleted
+        "401":
+          description: Missing or invalid token
+        "403":
+          description: Admin only
+        "404":
+          description: Organisation not found
+
+  /organisations/{organisationId}/organisers:
+    post:
+      summary: Assign human to organisation (admin only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: organisationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [humanId]
+              properties:
+                humanId:
+                  type: integer
+      responses:
+        "201":
+          description: Organiser assigned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  humanId:
+                    type: integer
+                  organisationId:
+                    type: integer
+                  createdAt:
+                    type: string
+                    format: date-time
+        "400":
+          description: humanId is required
+        "401":
+          description: Missing or invalid token
+        "403":
+          description: Admin only
+        "404":
+          description: Organisation or human not found
+        "409":
+          description: Human is already an organiser
+
+  /organisations/{organisationId}/organisers/{humanId}:
+    delete:
+      summary: Unassign human from organisation (admin only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: organisationId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: humanId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Organiser removed
+        "401":
+          description: Missing or invalid token
+        "403":
+          description: Admin only
+        "404":
+          description: Organisation or human not found
+        "409":
+          description: Human is not an organiser
+
+  /events:
+    post:
+      summary: Create event
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, description, latitude, longitude, startDate, endDate]
+              properties:
+                title:
+                  type: string
+                  minLength: 1
+                  maxLength: 256
+                description:
+                  type: string
+                latitude:
+                  type: number
+                  minimum: -90
+                  maximum: 90
+                longitude:
+                  type: number
+                  minimum: -180
+                  maximum: 180
+                startDate:
+                  type: string
+                  format: date-time
+                endDate:
+                  type: string
+                  format: date-time
+                organisationId:
+                  type: integer
+                  nullable: true
+      responses:
+        "201":
+          description: Event created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  humanId:
+                    type: integer
+                  organisationId:
+                    type: integer
+                    nullable: true
+                  title:
+                    type: string
+                  description:
+                    type: string
+                  latitude:
+                    type: number
+                  longitude:
+                    type: number
+                  startDate:
+                    type: string
+                    format: date-time
+                  endDate:
+                    type: string
+                    format: date-time
+                  createdAt:
+                    type: string
+                    format: date-time
+        "400":
+          description: Validation error
+        "401":
+          description: Missing or invalid token
+        "403":
+          description: Not an organiser of this organisation
+        "404":
+          description: Organisation not found
+
+    get:
+      summary: List events
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        "200":
+          description: Paginated list of events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                        humanId:
+                          type: integer
+                        organisationId:
+                          type: integer
+                          nullable: true
+                        title:
+                          type: string
+                        description:
+                          type: string
+                        latitude:
+                          type: number
+                        longitude:
+                          type: number
+                        startDate:
+                          type: string
+                          format: date-time
+                        endDate:
+                          type: string
+                          format: date-time
+                        createdAt:
+                          type: string
+                          format: date-time
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  limit:
+                    type: integer
+
+  /events/{id}:
+    get:
+      summary: Get event by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Event found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  humanId:
+                    type: integer
+                  organisationId:
+                    type: integer
+                    nullable: true
+                  title:
+                    type: string
+                  description:
+                    type: string
+                  latitude:
+                    type: number
+                  longitude:
+                    type: number
+                  startDate:
+                    type: string
+                    format: date-time
+                  endDate:
+                    type: string
+                    format: date-time
+                  createdAt:
+                    type: string
+                    format: date-time
+        "404":
+          description: Event not found
+
+    put:
+      summary: Update event
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, description, latitude, longitude, startDate, endDate]
+              properties:
+                title:
+                  type: string
+                  minLength: 1
+                  maxLength: 256
+                description:
+                  type: string
+                latitude:
+                  type: number
+                  minimum: -90
+                  maximum: 90
+                longitude:
+                  type: number
+                  minimum: -180
+                  maximum: 180
+                startDate:
+                  type: string
+                  format: date-time
+                endDate:
+                  type: string
+                  format: date-time
+                organisationId:
+                  type: integer
+                  nullable: true
+      responses:
+        "200":
+          description: Event updated
+        "400":
+          description: Validation error
+        "401":
+          description: Missing or invalid token
+        "403":
+          description: Not an organiser of this organisation
+        "404":
+          description: Event or organisation not found
+
+    delete:
+      summary: Delete event
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Event deleted
+        "404":
+          description: Event not found
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

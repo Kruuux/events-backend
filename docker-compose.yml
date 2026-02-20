@@ -1,0 +1,50 @@
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: events
+      POSTGRES_PASSWORD: events
+      POSTGRES_DB: events
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U events"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build:
+      context: .
+      target: build
+    command: ["node", "dist/migrate.js"]
+    volumes:
+      - ./migrations:/app/migrations
+    environment:
+      DATABASE_URL: postgres://events:events@db:5432/events
+    depends_on:
+      db:
+        condition: service_healthy
+
+  server:
+    build:
+      context: .
+      target: dev
+    volumes:
+      - ./src:/app/src
+      - ./docs:/app/docs
+      - ./migrations:/app/migrations
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://events:events@db:5432/events
+      JWT_SECRET: change-me-in-production
+      PORT: "3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:
