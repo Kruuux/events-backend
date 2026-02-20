@@ -314,12 +314,17 @@ app.get('/organisations', async (req: Request, res: Response) => {
 });
 
 const UpdateOrganisationSchema = v.object({
+  id: v.pipe(v.string(), v.regex(/^\d+$/)),
   name: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
 });
 
 app.put('/organisations/:id', async (req: Request, res: Response) => {
-  const params = validate(IdParamSchema, req.params, res);
-  if (!params) return;
+  const data = validate(
+    UpdateOrganisationSchema,
+    { ...req.params, ...req.body },
+    res,
+  );
+  if (!data) return;
 
   const payload = authenticate(req);
   if (!payload) {
@@ -331,12 +336,9 @@ app.put('/organisations/:id', async (req: Request, res: Response) => {
     return;
   }
 
-  const data = validate(UpdateOrganisationSchema, req.body, res);
-  if (!data) return;
-
   const nameCheck = await pool.query(
     'SELECT id FROM organisations WHERE name = $1 AND id != $2',
-    [data.name, params.id],
+    [data.name, data.id],
   );
   if (nameCheck.rows.length > 0) {
     res.status(409).json({ error: 'organisation name already taken' });
@@ -346,7 +348,7 @@ app.put('/organisations/:id', async (req: Request, res: Response) => {
   const row = await pool.query(
     `UPDATE organisations SET name = $1 WHERE id = $2
      RETURNING id, human_id AS "humanId", name, created_at AS "createdAt"`,
-    [data.name, params.id],
+    [data.name, data.id],
   );
 
   if (row.rows.length === 0) {
@@ -386,15 +388,12 @@ app.delete('/organisations/:id', async (req: Request, res: Response) => {
 
 // --- organisers ---
 
-const OrganiserParamSchema = v.object({
-  organisationId: v.pipe(v.string(), v.regex(/^\d+$/)),
-});
-
 const AssignOrganiserSchema = v.object({
+  organisationId: v.pipe(v.string(), v.regex(/^\d+$/)),
   humanId: v.number(),
 });
 
-const UnassignOrganiserParamSchema = v.object({
+const UnassignOrganiserSchema = v.object({
   organisationId: v.pipe(v.string(), v.regex(/^\d+$/)),
   humanId: v.pipe(v.string(), v.regex(/^\d+$/)),
 });
@@ -402,8 +401,12 @@ const UnassignOrganiserParamSchema = v.object({
 app.post(
   '/organisations/:organisationId/organisers',
   async (req: Request, res: Response) => {
-    const params = validate(OrganiserParamSchema, req.params, res);
-    if (!params) return;
+    const data = validate(
+      AssignOrganiserSchema,
+      { ...req.params, ...req.body },
+      res,
+    );
+    if (!data) return;
 
     const payload = authenticate(req);
     if (!payload) {
@@ -415,12 +418,9 @@ app.post(
       return;
     }
 
-    const data = validate(AssignOrganiserSchema, req.body, res);
-    if (!data) return;
-
     const orgCheck = await pool.query(
       'SELECT id FROM organisations WHERE id = $1',
-      [params.organisationId],
+      [data.organisationId],
     );
     if (orgCheck.rows.length === 0) {
       res.status(404).json({ error: 'organisation not found' });
@@ -437,7 +437,7 @@ app.post(
 
     const existingCheck = await pool.query(
       'SELECT id FROM organisers WHERE human_id = $1 AND organisation_id = $2',
-      [data.humanId, params.organisationId],
+      [data.humanId, data.organisationId],
     );
     if (existingCheck.rows.length > 0) {
       res.status(409).json({ error: 'human is already an organiser' });
@@ -448,7 +448,7 @@ app.post(
       `INSERT INTO organisers (human_id, organisation_id)
        VALUES ($1, $2)
        RETURNING id, human_id AS "humanId", organisation_id AS "organisationId", created_at AS "createdAt"`,
-      [data.humanId, params.organisationId],
+      [data.humanId, data.organisationId],
     );
 
     res.status(201).json(row.rows[0]);
@@ -458,8 +458,8 @@ app.post(
 app.delete(
   '/organisations/:organisationId/organisers/:humanId',
   async (req: Request, res: Response) => {
-    const params = validate(UnassignOrganiserParamSchema, req.params, res);
-    if (!params) return;
+    const data = validate(UnassignOrganiserSchema, req.params, res);
+    if (!data) return;
 
     const payload = authenticate(req);
     if (!payload) {
@@ -473,7 +473,7 @@ app.delete(
 
     const orgCheck = await pool.query(
       'SELECT id FROM organisations WHERE id = $1',
-      [params.organisationId],
+      [data.organisationId],
     );
     if (orgCheck.rows.length === 0) {
       res.status(404).json({ error: 'organisation not found' });
@@ -481,7 +481,7 @@ app.delete(
     }
 
     const humanCheck = await pool.query('SELECT id FROM humans WHERE id = $1', [
-      params.humanId,
+      data.humanId,
     ]);
     if (humanCheck.rows.length === 0) {
       res.status(404).json({ error: 'human not found' });
@@ -490,7 +490,7 @@ app.delete(
 
     const row = await pool.query(
       'DELETE FROM organisers WHERE human_id = $1 AND organisation_id = $2 RETURNING id',
-      [params.humanId, params.organisationId],
+      [data.humanId, data.organisationId],
     );
 
     if (row.rows.length === 0) {
@@ -608,6 +608,7 @@ app.get('/events/:id', async (req: Request, res: Response) => {
 });
 
 const UpdateEventSchema = v.object({
+  id: v.pipe(v.string(), v.regex(/^\d+$/)),
   title: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
   description: v.string(),
   latitude: v.pipe(v.number(), v.minValue(-90), v.maxValue(90)),
@@ -618,17 +619,14 @@ const UpdateEventSchema = v.object({
 });
 
 app.put('/events/:id', async (req: Request, res: Response) => {
-  const params = validate(IdParamSchema, req.params, res);
-  if (!params) return;
+  const data = validate(UpdateEventSchema, { ...req.params, ...req.body }, res);
+  if (!data) return;
 
   const payload = authenticate(req);
   if (!payload) {
     res.status(401).json({ error: 'missing or invalid token' });
     return;
   }
-
-  const data = validate(UpdateEventSchema, req.body, res);
-  if (!data) return;
 
   if (data.organisationId != null) {
     const orgCheck = await pool.query(
@@ -666,7 +664,7 @@ app.put('/events/:id', async (req: Request, res: Response) => {
       data.startDate,
       data.endDate,
       data.organisationId ?? null,
-      params.id,
+      data.id,
     ],
   );
 
