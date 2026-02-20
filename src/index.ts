@@ -112,7 +112,7 @@ app.post('/join', async (req: Request, res: Response) => {
     [email],
   );
   if (emailCheck.rows.length > 0) {
-    res.status(409).json({ error: 'account already taken' });
+    res.status(409).json({ code: 'EMAIL_ALREADY_TAKEN_EXCEPTION' });
     return;
   }
 
@@ -121,7 +121,7 @@ app.post('/join', async (req: Request, res: Response) => {
     [nickname],
   );
   if (nicknameCheck.rows.length > 0) {
-    res.status(409).json({ error: 'nickname already taken' });
+    res.status(409).json({ code: 'NICKNAME_ALREADY_TAKEN_EXCEPTION' });
     return;
   }
 
@@ -138,7 +138,7 @@ app.post('/join', async (req: Request, res: Response) => {
     [nickname, email, hash, salt, role],
   );
 
-  res.status(201).json({ message: 'account created' });
+  res.status(201).end();
 });
 
 const EnterSchema = v.object({
@@ -158,7 +158,7 @@ app.post('/enter', async (req: Request, res: Response) => {
   );
 
   if (humanResult.rows.length === 0) {
-    res.status(401).json({ error: 'invalid credentials' });
+    res.status(401).json({ code: 'INVALID_CREDENTIALS_EXCEPTION' });
     return;
   }
 
@@ -172,7 +172,7 @@ app.post('/enter', async (req: Request, res: Response) => {
   });
 
   if (hash !== human.password_hash) {
-    res.status(401).json({ error: 'invalid credentials' });
+    res.status(401).json({ code: 'INVALID_CREDENTIALS_EXCEPTION' });
     return;
   }
 
@@ -201,12 +201,12 @@ app.post('/refresh', async (req: Request, res: Response) => {
   try {
     payload = jwt.verify(data.refreshToken, JWT_SECRET) as jwt.JwtPayload;
   } catch {
-    res.status(401).json({ error: 'invalid refresh token' });
+    res.status(401).json({ code: 'INVALID_REFRESH_TOKEN_EXCEPTION' });
     return;
   }
 
   if (payload.type !== 'refresh') {
-    res.status(401).json({ error: 'invalid refresh token' });
+    res.status(401).json({ code: 'INVALID_REFRESH_TOKEN_EXCEPTION' });
     return;
   }
 
@@ -217,7 +217,7 @@ app.post('/refresh', async (req: Request, res: Response) => {
   );
 
   if (session.rows.length === 0) {
-    res.status(401).json({ error: 'invalid refresh token' });
+    res.status(401).json({ code: 'INVALID_REFRESH_TOKEN_EXCEPTION' });
     return;
   }
 
@@ -243,13 +243,13 @@ app.post('/refresh', async (req: Request, res: Response) => {
 app.post('/logout-all', async (req: Request, res: Response) => {
   const payload = authenticate(req);
   if (!payload) {
-    res.status(401).json({ error: 'missing or invalid token' });
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
     return;
   }
 
   await pool.query('DELETE FROM sessions WHERE human_id = $1', [payload.sub]);
 
-  res.status(200).json({ message: 'all sessions ended' });
+  res.status(200).end();
 });
 
 // --- organisations ---
@@ -261,11 +261,11 @@ const CreateOrganisationSchema = v.object({
 app.post('/organisations', async (req: Request, res: Response) => {
   const payload = authenticate(req);
   if (!payload) {
-    res.status(401).json({ error: 'missing or invalid token' });
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
     return;
   }
   if (payload.role !== 'admin') {
-    res.status(403).json({ error: 'admin only' });
+    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
     return;
   }
 
@@ -277,7 +277,7 @@ app.post('/organisations', async (req: Request, res: Response) => {
     [data.name],
   );
   if (nameCheck.rows.length > 0) {
-    res.status(409).json({ error: 'organisation name already taken' });
+    res.status(409).json({ code: 'ORGANISATION_NAME_ALREADY_TAKEN_EXCEPTION' });
     return;
   }
 
@@ -328,11 +328,11 @@ app.put('/organisations/:id', async (req: Request, res: Response) => {
 
   const payload = authenticate(req);
   if (!payload) {
-    res.status(401).json({ error: 'missing or invalid token' });
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
     return;
   }
   if (payload.role !== 'admin') {
-    res.status(403).json({ error: 'admin only' });
+    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
     return;
   }
 
@@ -341,7 +341,7 @@ app.put('/organisations/:id', async (req: Request, res: Response) => {
     [data.name, data.id],
   );
   if (nameCheck.rows.length > 0) {
-    res.status(409).json({ error: 'organisation name already taken' });
+    res.status(409).json({ code: 'ORGANISATION_NAME_ALREADY_TAKEN_EXCEPTION' });
     return;
   }
 
@@ -352,7 +352,7 @@ app.put('/organisations/:id', async (req: Request, res: Response) => {
   );
 
   if (row.rows.length === 0) {
-    res.status(404).json({ error: 'organisation not found' });
+    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
     return;
   }
 
@@ -365,11 +365,11 @@ app.delete('/organisations/:id', async (req: Request, res: Response) => {
 
   const payload = authenticate(req);
   if (!payload) {
-    res.status(401).json({ error: 'missing or invalid token' });
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
     return;
   }
   if (payload.role !== 'admin') {
-    res.status(403).json({ error: 'admin only' });
+    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
     return;
   }
 
@@ -379,11 +379,11 @@ app.delete('/organisations/:id', async (req: Request, res: Response) => {
   );
 
   if (row.rows.length === 0) {
-    res.status(404).json({ error: 'organisation not found' });
+    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
     return;
   }
 
-  res.status(200).json({ message: 'organisation deleted' });
+  res.status(200).end();
 });
 
 // --- organisers ---
@@ -410,11 +410,11 @@ app.post(
 
     const payload = authenticate(req);
     if (!payload) {
-      res.status(401).json({ error: 'missing or invalid token' });
+      res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
       return;
     }
     if (payload.role !== 'admin') {
-      res.status(403).json({ error: 'admin only' });
+      res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
       return;
     }
 
@@ -423,7 +423,7 @@ app.post(
       [data.organisationId],
     );
     if (orgCheck.rows.length === 0) {
-      res.status(404).json({ error: 'organisation not found' });
+      res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
       return;
     }
 
@@ -431,7 +431,7 @@ app.post(
       data.humanId,
     ]);
     if (humanCheck.rows.length === 0) {
-      res.status(404).json({ error: 'human not found' });
+      res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
       return;
     }
 
@@ -440,7 +440,7 @@ app.post(
       [data.humanId, data.organisationId],
     );
     if (existingCheck.rows.length > 0) {
-      res.status(409).json({ error: 'human is already an organiser' });
+      res.status(409).json({ code: 'ALREADY_ORGANISER_EXCEPTION' });
       return;
     }
 
@@ -463,11 +463,11 @@ app.delete(
 
     const payload = authenticate(req);
     if (!payload) {
-      res.status(401).json({ error: 'missing or invalid token' });
+      res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
       return;
     }
     if (payload.role !== 'admin') {
-      res.status(403).json({ error: 'admin only' });
+      res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
       return;
     }
 
@@ -476,7 +476,7 @@ app.delete(
       [data.organisationId],
     );
     if (orgCheck.rows.length === 0) {
-      res.status(404).json({ error: 'organisation not found' });
+      res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
       return;
     }
 
@@ -484,7 +484,7 @@ app.delete(
       data.humanId,
     ]);
     if (humanCheck.rows.length === 0) {
-      res.status(404).json({ error: 'human not found' });
+      res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
       return;
     }
 
@@ -494,11 +494,11 @@ app.delete(
     );
 
     if (row.rows.length === 0) {
-      res.status(409).json({ error: 'human is not an organiser' });
+      res.status(409).json({ code: 'NOT_AN_ORGANISER_EXCEPTION' });
       return;
     }
 
-    res.status(200).json({ message: 'organiser removed' });
+    res.status(200).end();
   },
 );
 
@@ -517,7 +517,7 @@ const CreateEventSchema = v.object({
 app.post('/events', async (req: Request, res: Response) => {
   const payload = authenticate(req);
   if (!payload) {
-    res.status(401).json({ error: 'missing or invalid token' });
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
     return;
   }
 
@@ -530,7 +530,7 @@ app.post('/events', async (req: Request, res: Response) => {
       [data.organisationId],
     );
     if (orgCheck.rows.length === 0) {
-      res.status(404).json({ error: 'organisation not found' });
+      res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
       return;
     }
 
@@ -540,9 +540,7 @@ app.post('/events', async (req: Request, res: Response) => {
         [payload.sub, data.organisationId],
       );
       if (organiserCheck.rows.length === 0) {
-        res
-          .status(403)
-          .json({ error: 'not an organiser of this organisation' });
+        res.status(403).json({ code: 'NOT_ORGANISER_EXCEPTION' });
         return;
       }
     }
@@ -600,7 +598,7 @@ app.get('/events/:id', async (req: Request, res: Response) => {
   );
 
   if (row.rows.length === 0) {
-    res.status(404).json({ error: 'event not found' });
+    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
     return;
   }
 
@@ -624,7 +622,7 @@ app.put('/events/:id', async (req: Request, res: Response) => {
 
   const payload = authenticate(req);
   if (!payload) {
-    res.status(401).json({ error: 'missing or invalid token' });
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
     return;
   }
 
@@ -634,7 +632,7 @@ app.put('/events/:id', async (req: Request, res: Response) => {
       [data.organisationId],
     );
     if (orgCheck.rows.length === 0) {
-      res.status(404).json({ error: 'organisation not found' });
+      res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
       return;
     }
 
@@ -644,9 +642,7 @@ app.put('/events/:id', async (req: Request, res: Response) => {
         [payload.sub, data.organisationId],
       );
       if (organiserCheck.rows.length === 0) {
-        res
-          .status(403)
-          .json({ error: 'not an organiser of this organisation' });
+        res.status(403).json({ code: 'NOT_ORGANISER_EXCEPTION' });
         return;
       }
     }
@@ -669,7 +665,7 @@ app.put('/events/:id', async (req: Request, res: Response) => {
   );
 
   if (row.rows.length === 0) {
-    res.status(404).json({ error: 'event not found' });
+    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
     return;
   }
 
@@ -686,11 +682,11 @@ app.delete('/events/:id', async (req: Request, res: Response) => {
   );
 
   if (row.rows.length === 0) {
-    res.status(404).json({ error: 'event not found' });
+    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
     return;
   }
 
-  res.status(200).json({ message: 'event deleted' });
+  res.status(200).end();
 });
 
 // --- docs ---

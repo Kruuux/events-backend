@@ -33,14 +33,21 @@ paths:
       responses:
         "201":
           description: Account created
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MessageResponse"
         "400":
           $ref: "#/components/responses/ValidationException"
         "409":
           description: Email or nickname already taken
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              examples:
+                emailTaken:
+                  value:
+                    code: EMAIL_ALREADY_TAKEN_EXCEPTION
+                nicknameTaken:
+                  value:
+                    code: NICKNAME_ALREADY_TAKEN_EXCEPTION
 
   /enter:
     post:
@@ -69,6 +76,12 @@ paths:
           $ref: "#/components/responses/ValidationException"
         "401":
           description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: INVALID_CREDENTIALS_EXCEPTION
 
   /refresh:
     post:
@@ -94,6 +107,12 @@ paths:
           $ref: "#/components/responses/ValidationException"
         "401":
           description: Invalid or expired refresh token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: INVALID_REFRESH_TOKEN_EXCEPTION
 
   /logout-all:
     post:
@@ -103,12 +122,14 @@ paths:
       responses:
         "200":
           description: All sessions ended
+        "401":
+          description: Missing or invalid token
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MessageResponse"
-        "401":
-          description: Missing or invalid token
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: UNAUTHORIZED_EXCEPTION
 
   /organisations:
     post:
@@ -138,10 +159,28 @@ paths:
           $ref: "#/components/responses/ValidationException"
         "401":
           description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: UNAUTHORIZED_EXCEPTION
         "403":
           description: Admin only
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: ADMIN_ONLY_EXCEPTION
         "409":
           description: Name already taken
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: ORGANISATION_NAME_ALREADY_TAKEN_EXCEPTION
 
     get:
       summary: List organisations
@@ -212,12 +251,36 @@ paths:
           $ref: "#/components/responses/ValidationException"
         "401":
           description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: UNAUTHORIZED_EXCEPTION
         "403":
           description: Admin only
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: ADMIN_ONLY_EXCEPTION
         "404":
           description: Organisation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: RESOURCE_NOT_FOUND_EXCEPTION
         "409":
           description: Name already taken
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: ORGANISATION_NAME_ALREADY_TAKEN_EXCEPTION
 
     delete:
       summary: Delete organisation (admin only)
@@ -232,18 +295,32 @@ paths:
       responses:
         "200":
           description: Organisation deleted
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MessageResponse"
         "400":
           $ref: "#/components/responses/ValidationException"
         "401":
           description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: UNAUTHORIZED_EXCEPTION
         "403":
           description: Admin only
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: ADMIN_ONLY_EXCEPTION
         "404":
           description: Organisation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: RESOURCE_NOT_FOUND_EXCEPTION
 
   /organisations/{organisationId}/organisers:
     post:
@@ -277,12 +354,36 @@ paths:
           $ref: "#/components/responses/ValidationException"
         "401":
           description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: UNAUTHORIZED_EXCEPTION
         "403":
           description: Admin only
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: ADMIN_ONLY_EXCEPTION
         "404":
           description: Organisation or human not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: RESOURCE_NOT_FOUND_EXCEPTION
         "409":
           description: Human is already an organiser
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: ALREADY_ORGANISER_EXCEPTION
 
   /organisations/{organisationId}/organisers/{humanId}:
     delete:
@@ -303,20 +404,40 @@ paths:
       responses:
         "200":
           description: Organiser removed
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MessageResponse"
         "400":
           $ref: "#/components/responses/ValidationException"
         "401":
           description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: UNAUTHORIZED_EXCEPTION
         "403":
           description: Admin only
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: ADMIN_ONLY_EXCEPTION
         "404":
           description: Organisation or human not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: RESOURCE_NOT_FOUND_EXCEPTION
         "409":
           description: Human is not an organiser
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: NOT_AN_ORGANISER_EXCEPTION
 
   /events:
     post:
@@ -365,10 +486,28 @@ paths:
           $ref: "#/components/responses/ValidationException"
         "401":
           description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: UNAUTHORIZED_EXCEPTION
         "403":
           description: Not an organiser of this organisation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: NOT_ORGANISER_EXCEPTION
         "404":
           description: Organisation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: RESOURCE_NOT_FOUND_EXCEPTION
 
     get:
       summary: List events
@@ -425,6 +564,12 @@ paths:
           $ref: "#/components/responses/ValidationException"
         "404":
           description: Event not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: RESOURCE_NOT_FOUND_EXCEPTION
 
     put:
       summary: Update event
@@ -478,10 +623,28 @@ paths:
           $ref: "#/components/responses/ValidationException"
         "401":
           description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: UNAUTHORIZED_EXCEPTION
         "403":
           description: Not an organiser of this organisation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: NOT_ORGANISER_EXCEPTION
         "404":
           description: Event or organisation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: RESOURCE_NOT_FOUND_EXCEPTION
 
     delete:
       summary: Delete event
@@ -494,14 +657,16 @@ paths:
       responses:
         "200":
           description: Event deleted
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MessageResponse"
         "400":
           $ref: "#/components/responses/ValidationException"
         "404":
           description: Event not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: RESOURCE_NOT_FOUND_EXCEPTION
 
 components:
   securitySchemes:
@@ -511,10 +676,11 @@ components:
       bearerFormat: JWT
 
   schemas:
-    MessageResponse:
+    ErrorCode:
       type: object
+      required: [code]
       properties:
-        message:
+        code:
           type: string
 
     TokenPair:
