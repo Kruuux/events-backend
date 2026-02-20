@@ -33,8 +33,12 @@ paths:
       responses:
         "201":
           description: Account created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
         "400":
-          description: Validation error
+          $ref: "#/components/responses/ValidationException"
         "409":
           description: Email or nickname already taken
 
@@ -60,14 +64,9 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  accessToken:
-                    type: string
-                  refreshToken:
-                    type: string
+                $ref: "#/components/schemas/TokenPair"
         "400":
-          description: Validation error
+          $ref: "#/components/responses/ValidationException"
         "401":
           description: Invalid credentials
 
@@ -90,14 +89,9 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  accessToken:
-                    type: string
-                  refreshToken:
-                    type: string
+                $ref: "#/components/schemas/TokenPair"
         "400":
-          description: Validation error
+          $ref: "#/components/responses/ValidationException"
         "401":
           description: Invalid or expired refresh token
 
@@ -109,6 +103,10 @@ paths:
       responses:
         "200":
           description: All sessions ended
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
         "401":
           description: Missing or invalid token
 
@@ -135,19 +133,9 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  id:
-                    type: integer
-                  humanId:
-                    type: integer
-                  name:
-                    type: string
-                  createdAt:
-                    type: string
-                    format: date-time
+                $ref: "#/components/schemas/Organisation"
         "400":
-          description: Validation error
+          $ref: "#/components/responses/ValidationException"
         "401":
           description: Missing or invalid token
         "403":
@@ -180,23 +168,15 @@ paths:
                   data:
                     type: array
                     items:
-                      type: object
-                      properties:
-                        id:
-                          type: integer
-                        humanId:
-                          type: integer
-                        name:
-                          type: string
-                        createdAt:
-                          type: string
-                          format: date-time
+                      $ref: "#/components/schemas/Organisation"
                   total:
                     type: integer
                   page:
                     type: integer
                   limit:
                     type: integer
+        "400":
+          $ref: "#/components/responses/ValidationException"
 
   /organisations/{id}:
     put:
@@ -224,8 +204,12 @@ paths:
       responses:
         "200":
           description: Organisation updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Organisation"
         "400":
-          description: Validation error
+          $ref: "#/components/responses/ValidationException"
         "401":
           description: Missing or invalid token
         "403":
@@ -248,6 +232,12 @@ paths:
       responses:
         "200":
           description: Organisation deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          $ref: "#/components/responses/ValidationException"
         "401":
           description: Missing or invalid token
         "403":
@@ -282,19 +272,9 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  id:
-                    type: integer
-                  humanId:
-                    type: integer
-                  organisationId:
-                    type: integer
-                  createdAt:
-                    type: string
-                    format: date-time
+                $ref: "#/components/schemas/Organiser"
         "400":
-          description: humanId is required
+          $ref: "#/components/responses/ValidationException"
         "401":
           description: Missing or invalid token
         "403":
@@ -323,6 +303,12 @@ paths:
       responses:
         "200":
           description: Organiser removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          $ref: "#/components/responses/ValidationException"
         "401":
           description: Missing or invalid token
         "403":
@@ -374,34 +360,9 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  id:
-                    type: integer
-                  humanId:
-                    type: integer
-                  organisationId:
-                    type: integer
-                    nullable: true
-                  title:
-                    type: string
-                  description:
-                    type: string
-                  latitude:
-                    type: number
-                  longitude:
-                    type: number
-                  startDate:
-                    type: string
-                    format: date-time
-                  endDate:
-                    type: string
-                    format: date-time
-                  createdAt:
-                    type: string
-                    format: date-time
+                $ref: "#/components/schemas/Event"
         "400":
-          description: Validation error
+          $ref: "#/components/responses/ValidationException"
         "401":
           description: Missing or invalid token
         "403":
@@ -434,38 +395,15 @@ paths:
                   data:
                     type: array
                     items:
-                      type: object
-                      properties:
-                        id:
-                          type: integer
-                        humanId:
-                          type: integer
-                        organisationId:
-                          type: integer
-                          nullable: true
-                        title:
-                          type: string
-                        description:
-                          type: string
-                        latitude:
-                          type: number
-                        longitude:
-                          type: number
-                        startDate:
-                          type: string
-                          format: date-time
-                        endDate:
-                          type: string
-                          format: date-time
-                        createdAt:
-                          type: string
-                          format: date-time
+                      $ref: "#/components/schemas/Event"
                   total:
                     type: integer
                   page:
                     type: integer
                   limit:
                     type: integer
+        "400":
+          $ref: "#/components/responses/ValidationException"
 
   /events/{id}:
     get:
@@ -482,32 +420,9 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  id:
-                    type: integer
-                  humanId:
-                    type: integer
-                  organisationId:
-                    type: integer
-                    nullable: true
-                  title:
-                    type: string
-                  description:
-                    type: string
-                  latitude:
-                    type: number
-                  longitude:
-                    type: number
-                  startDate:
-                    type: string
-                    format: date-time
-                  endDate:
-                    type: string
-                    format: date-time
-                  createdAt:
-                    type: string
-                    format: date-time
+                $ref: "#/components/schemas/Event"
+        "400":
+          $ref: "#/components/responses/ValidationException"
         "404":
           description: Event not found
 
@@ -555,8 +470,12 @@ paths:
       responses:
         "200":
           description: Event updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Event"
         "400":
-          description: Validation error
+          $ref: "#/components/responses/ValidationException"
         "401":
           description: Missing or invalid token
         "403":
@@ -575,6 +494,12 @@ paths:
       responses:
         "200":
           description: Event deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          $ref: "#/components/responses/ValidationException"
         "404":
           description: Event not found
 
@@ -584,3 +509,102 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+
+  schemas:
+    MessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+
+    TokenPair:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+
+    Organisation:
+      type: object
+      properties:
+        id:
+          type: integer
+        humanId:
+          type: integer
+        name:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    Organiser:
+      type: object
+      properties:
+        id:
+          type: integer
+        humanId:
+          type: integer
+        organisationId:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+
+    Event:
+      type: object
+      properties:
+        id:
+          type: integer
+        humanId:
+          type: integer
+        organisationId:
+          type: integer
+          nullable: true
+        title:
+          type: string
+        description:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+        startDate:
+          type: string
+          format: date-time
+        endDate:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+  responses:
+    ValidationException:
+      description: Validation failed
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [code, violations]
+            properties:
+              code:
+                type: string
+                enum: [VALIDATION_EXCEPTION]
+              violations:
+                type: array
+                items:
+                  type: object
+                  required: [property, message]
+                  properties:
+                    property:
+                      type: string
+                    message:
+                      type: string
+          example:
+            code: VALIDATION_EXCEPTION
+            violations:
+              - property: nickname
+                message: "Invalid length: Expected >=2 but received 1"
+              - property: role
+                message: "Invalid type: Expected \"admin\" | \"member\" but received \"foo\""
