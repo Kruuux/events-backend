@@ -486,6 +486,39 @@ app.get(
   },
 );
 
+app.get('/places/:placeId/events', async (req: Request, res: Response) => {
+  const placeId = req.params.placeId;
+  const query = validate(PaginationSchema, req.query, res);
+  if (!query) return;
+
+  const page = Math.max(1, Number(query.page));
+  const limit = Math.min(100, Math.max(1, Number(query.limit)));
+  const offset = (page - 1) * limit;
+
+  const [countResult, rows] = await Promise.all([
+    pool.query('SELECT COUNT(*) FROM events WHERE place_id = $1', [placeId]),
+    pool.query(
+      `SELECT e.id, e.human_id AS "humanId", e.organisation_id AS "organisationId",
+                e.title, e.description,
+                p.latitude, p.longitude, p.name AS "placeName", p.address AS "placeAddress",
+                e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
+                o.name AS "organisationName"
+         FROM events e
+         JOIN places p ON p.id = e.place_id
+         LEFT JOIN organisations o ON o.id = e.organisation_id
+         WHERE e.place_id = $1
+         ORDER BY CASE WHEN e.start_date >= CURRENT_DATE THEN 0 ELSE 1 END,
+                  CASE WHEN e.start_date >= CURRENT_DATE THEN e.start_date END ASC,
+                  CASE WHEN e.start_date < CURRENT_DATE THEN e.start_date END DESC
+         LIMIT $2 OFFSET $3`,
+      [placeId, limit, offset],
+    ),
+  ]);
+
+  const total = Number(countResult.rows[0]!.count);
+  res.status(200).json({ data: rows.rows, total, page, limit });
+});
+
 // --- countries ---
 
 const CreateCountrySchema = v.object({
@@ -1371,7 +1404,7 @@ const NAV_SCRIPT = `<script>
 try{const p=JSON.parse(atob(t.split('.')[1]));
 if(p.role==='admin'){const s=document.getElementById('adminNav');if(s)s.style.display='inline'}}catch{}})();
 </script>`;
-const APP_NAV = `<nav>[<a href="/">Events</a>] [<a href="/organisations-list">Organisations</a>] [<a href="/create-event">Create event</a>] <span id="adminNav" style="display:none">[<a href="/create-organisation">Create organisation</a>] [<a href="/countries-list">Countries</a>] [<a href="/cities-list">Cities</a>] [<a href="/places-list">Places</a>] </span>[<a href="/profile">Profile</a>]</nav>${NAV_SCRIPT}`;
+const APP_NAV = `<nav>[<a href="/">Events</a>] [<a href="/organisations-list">Organisations</a>] <span id="adminNav" style="display:none">[<a href="/countries-list">Countries</a>] [<a href="/cities-list">Cities</a>] [<a href="/places-list">Places</a>] </span>[<a href="/profile">Profile</a>]</nav>${NAV_SCRIPT}`;
 
 const ORG_SEARCH_HTML = `Organisation (optional)<br><input type="text" id="orgSearch" placeholder="Search by name..." autocomplete="off"><input type="hidden" name="organisationId" id="orgId"><div class="dropdown" id="orgDrop"></div>`;
 const ORG_SEARCH_SCRIPT = `
@@ -1433,6 +1466,18 @@ app.get('/', (_req: Request, res: Response) => {
 <h1>Events</h1>
 ${APP_NAV}
 <hr>
+<div id="createForm" style="display:none">
+<b>Create event</b><br>
+Title<br><input type="text" id="evTitle" required><br>
+Description<br><input type="text" id="evDescription" required><br>
+${PLACE_SEARCH_HTML}<br>
+Start<br><input type="datetime-local" id="evStart" required><br>
+End<br><input type="datetime-local" id="evEnd" required><br>
+${ORG_SEARCH_HTML}<br>
+<button id="createBtn">Create</button>
+<p id="err"></p>
+<hr>
+</div>
 <p id="toggle"><b>list</b> | <a href="#" id="toMap">map</a></p>
 <div id="listView">
 <div id="list"></div>
@@ -1447,20 +1492,54 @@ ${APP_NAV}
 <script>
 if(!localStorage.getItem('accessToken'))window.location.href='/login';
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+const t=localStorage.getItem('accessToken');
+let me={};
+try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
+
+// --- create form (admin only) ---
+if(me.role==='admin'){
+  document.getElementById('createForm').style.display='block';
+  ${PLACE_SEARCH_SCRIPT}
+  ${ORG_SEARCH_SCRIPT}
+  document.getElementById('createBtn').onclick=async()=>{
+    const title=document.getElementById('evTitle').value.trim();
+    const description=document.getElementById('evDescription').value.trim();
+    const placeId=document.getElementById('placeId').value;
+    const startDate=document.getElementById('evStart').value;
+    const endDate=document.getElementById('evEnd').value;
+    const organisationId=document.getElementById('orgId').value;
+    if(!title||!description||!placeId||!startDate||!endDate){document.getElementById('err').textContent='Please fill all required fields';return}
+    const body={title,description,placeId,startDate:new Date(startDate).toISOString(),endDate:new Date(endDate).toISOString()};
+    if(organisationId)body.organisationId=organisationId;
+    const r=await fetch('/events',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify(body)});
+    if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+    document.getElementById('err').textContent='';
+    document.getElementById('evTitle').value='';
+    document.getElementById('evDescription').value='';
+    document.getElementById('placeId').value='';
+    document.getElementById('placeSearch').value='';
+    document.getElementById('evStart').value='';
+    document.getElementById('evEnd').value='';
+    document.getElementById('orgId').value='';
+    document.getElementById('orgSearch').value='';
+    page=1;done=false;lastDateLabel='';
+    document.getElementById('list').innerHTML='';
+    load();
+  };
+}
 
 // --- list view ---
 let page=1;const limit=20;let loading=false;let done=false;
 let lastDateLabel='';
 function dateLabel(ds){
-  const d=new Date(ds);
+  const dt=new Date(ds);
   const now=new Date();
   const today=new Date(now.getFullYear(),now.getMonth(),now.getDate());
   const tmrw=new Date(today);tmrw.setDate(tmrw.getDate()+1);
-  const dayAfter=new Date(today);dayAfter.setDate(dayAfter.getDate()+2);
-  const t=new Date(d.getFullYear(),d.getMonth(),d.getDate());
-  if(t.getTime()===today.getTime())return 'Today';
-  if(t.getTime()===tmrw.getTime())return 'Tomorrow';
-  return d.getDate()+' '+d.toLocaleString('en',{month:'long'})+' '+d.getFullYear();
+  const dd=new Date(dt.getFullYear(),dt.getMonth(),dt.getDate());
+  if(dd.getTime()===today.getTime())return 'Today';
+  if(dd.getTime()===tmrw.getTime())return 'Tomorrow';
+  return dt.getDate()+' '+dt.toLocaleString('en',{month:'long'})+' '+dt.getFullYear();
 }
 async function load(){
   if(loading||done)return;
@@ -1479,14 +1558,25 @@ async function load(){
       h.textContent=lbl;
       list.appendChild(h);
     }
-    const d=document.createElement('div');
+    const dv=document.createElement('div');
     let evHtml='<a href="/view/event/'+ev.id+'"><b>'+esc(ev.title)+'</b></a><br>'
       +esc(ev.description)+'<br>';
+    if(ev.placeName)evHtml+='<small>Place: <a href="/view/place/'+ev.placeId+'">'+esc(ev.placeName)+'</a></small><br>';
     if(ev.organisationName)evHtml+='<small>Organisation: <a href="/view/organisation/'+ev.organisationId+'">'+esc(ev.organisationName)+'</a></small><br>';
+    if(me.role==='admin')evHtml+='<a href="/edit/event/'+ev.id+'">[edit]</a> <a href="#" class="delEv" data-id="'+ev.id+'">[delete]</a><br>';
     evHtml+='<hr>';
-    d.innerHTML=evHtml;
-    list.appendChild(d);
+    dv.innerHTML=evHtml;
+    list.appendChild(dv);
   }
+  list.querySelectorAll('.delEv').forEach(a=>{
+    a.onclick=async e=>{
+      e.preventDefault();
+      if(!confirm('Delete this event?'))return;
+      const r2=await fetch('/events/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
+      if(!r2.ok){return}
+      a.closest('div').remove();
+    };
+  });
   if(page*limit>=j.total){done=true;document.getElementById('end').style.display='block'}
   else{page++}
   loading=false;
@@ -1577,12 +1667,39 @@ app.get('/organisations-list', (_req: Request, res: Response) => {
 <h1>Organisations</h1>
 ${APP_NAV}
 <hr>
+<div id="createForm" style="display:none">
+<b>Create organisation</b><br>
+<input type="text" id="orgName" placeholder="Organisation name" required>
+<button id="createBtn">Create</button>
+<p id="err"></p>
+<hr>
+</div>
 <div id="list"></div>
 <p id="loading">Loading...</p>
 <p id="end">---</p>
 </div>
 <script>
 if(!localStorage.getItem('accessToken'))window.location.href='/login';
+const t=localStorage.getItem('accessToken');
+let me={};
+try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+
+if(me.role==='admin'){
+  document.getElementById('createForm').style.display='block';
+  document.getElementById('createBtn').onclick=async()=>{
+    const name=document.getElementById('orgName').value.trim();
+    if(!name)return;
+    const r=await fetch('/organisations',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name})});
+    if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+    document.getElementById('orgName').value='';
+    document.getElementById('err').textContent='';
+    page=1;done=false;
+    document.getElementById('list').innerHTML='';
+    load();
+  };
+}
+
 let page=1;const limit=20;let loading=false;let done=false;
 async function load(){
   if(loading||done)return;
@@ -1593,17 +1710,29 @@ async function load(){
   const j=await r.json();
   const list=document.getElementById('list');
   for(const o of j.data){
-    const d=document.createElement('div');
-    d.innerHTML='<a href="/view/organisation/'+o.id+'"><b>'+esc(o.name)+'</b></a><br>'
-      +'<small>Created: '+new Date(o.createdAt).toLocaleString()+'</small><hr>';
-    list.appendChild(d);
+    const dv=document.createElement('div');
+    let oHtml='<a href="/view/organisation/'+o.id+'"><b>'+esc(o.name)+'</b></a><br>'
+      +'<small>Created: '+new Date(o.createdAt).toLocaleString()+'</small>';
+    if(me.role==='admin')oHtml+=' <a href="/edit/organisation/'+o.id+'">[edit]</a> <a href="#" class="delOrg" data-id="'+o.id+'">[delete]</a>';
+    oHtml+='<hr>';
+    dv.innerHTML=oHtml;
+    list.appendChild(dv);
   }
+  list.querySelectorAll('.delOrg').forEach(a=>{
+    a.onclick=async e=>{
+      e.preventDefault();
+      if(!confirm('Delete this organisation?'))return;
+      const r2=await fetch('/organisations/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
+      if(!r2.ok){const j2=await r2.json();document.getElementById('err').textContent=j2.code||JSON.stringify(j2);return}
+      document.getElementById('err').textContent='';
+      a.closest('div').remove();
+    };
+  });
   if(page*limit>=j.total){done=true;document.getElementById('end').style.display='block'}
   else{page++}
   loading=false;
   document.getElementById('loading').style.display=done?'none':'block';
 }
-function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 window.addEventListener('scroll',()=>{
   if(window.innerHeight+window.scrollY>=document.body.offsetHeight-200)load();
 });
@@ -1634,10 +1763,9 @@ try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
   const ev=await r.json();
   document.getElementById('title').textContent=ev.title;
   let html='<p>'+esc(ev.description)+'</p>'
-    +'<p>Place: '+esc(ev.placeName)+' - '+esc(ev.placeAddress)+'</p>'
+    +'<p>Place: <a href="/view/place/'+ev.placeId+'">'+esc(ev.placeName)+'</a> - '+esc(ev.placeAddress)+'</p>'
     +'<p>Start: '+new Date(ev.startDate).toLocaleString()+'</p>'
-    +'<p>End: '+new Date(ev.endDate).toLocaleString()+'</p>'
-    +'<p>Created: '+new Date(ev.createdAt).toLocaleString()+'</p>';
+    +'<p>End: '+new Date(ev.endDate).toLocaleString()+'</p>';
   if(ev.organisationId)html+='<p>Organisation: <a href="/view/organisation/'+ev.organisationId+'">'+esc(ev.organisationName||ev.organisationId)+'</a></p>';
   const canEdit=me.role==='admin';
   if(canEdit){
@@ -1691,8 +1819,18 @@ try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
     +'<p>Created: '+new Date(o.createdAt).toLocaleString()+'</p>';
   if(me.role==='admin'){
     html+='<br><a href="/edit/organisation/'+o.id+'">[edit]</a>';
+    html+=' <a href="#" id="deleteBtn">[delete]</a>';
   }
   document.getElementById('detail').innerHTML=html;
+  if(me.role==='admin'){
+    document.getElementById('deleteBtn').onclick=async function(e){
+      e.preventDefault();
+      if(!confirm('Delete this organisation?'))return;
+      const dr=await fetch('/organisations/'+id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
+      if(!dr.ok){const dj=await dr.json();document.getElementById('err').textContent=dj.code||JSON.stringify(dj);return}
+      window.location.href='/organisations-list';
+    };
+  }
   document.getElementById('eventsSection').style.display='block';
   loadEvents();
 })();
@@ -1743,39 +1881,82 @@ window.addEventListener('scroll',()=>{
 </body></html>`);
 });
 
-app.get('/create-event', (_req: Request, res: Response) => {
+app.get('/view/place/:id', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>
-<html><head><title>Create event</title>${PAGE_HEAD}</head><body>
+<html><head><title>Place</title>${PAGE_HEAD}<style>#end{display:none}</style></head><body>
 <div class="c">
-<h1>Create event</h1>
+<h1 id="title">Place</h1>
 ${APP_NAV}
 <hr>
-<form id="f">
-Title<br><input type="text" name="title" required><br>
-Description<br><input type="text" name="description" required><br>
-${PLACE_SEARCH_HTML}<br>
-Start<br><input type="datetime-local" name="startDate" required><br>
-End<br><input type="datetime-local" name="endDate" required><br>
-${ORG_SEARCH_HTML}<br>
-<button type="submit">Create</button>
-</form>
+<div id="detail"></div>
 <p id="err"></p>
+<div id="eventsSection" style="display:none">
+<h2 style="margin:24px 0 12px">Events</h2>
+<div id="list"></div>
+<p id="loading">Loading...</p>
+<p id="end">---</p>
+</div>
 </div>
 <script>
 if(!localStorage.getItem('accessToken'))window.location.href='/login';
-try{const p=JSON.parse(atob(localStorage.getItem('accessToken').split('.')[1]));if(p.role!=='admin')window.location.href='/'}catch{window.location.href='/login'}
-${PLACE_SEARCH_SCRIPT}
-${ORG_SEARCH_SCRIPT}
-document.getElementById('f').onsubmit=async e=>{
-  e.preventDefault();
-  const fd=Object.fromEntries(new FormData(e.target));
-  if(!fd.placeId){document.getElementById('err').textContent='Please select a place';return}
-  const body={title:fd.title,description:fd.description,placeId:fd.placeId,startDate:new Date(fd.startDate).toISOString(),endDate:new Date(fd.endDate).toISOString()};
-  if(fd.organisationId)body.organisationId=fd.organisationId;
-  const r=await fetch('/events',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('accessToken')},body:JSON.stringify(body)});
-  if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
-  window.location.href='/';
-};
+const id=window.location.pathname.split('/').pop();
+(async()=>{
+  const r=await fetch('/places/'+id);
+  if(!r.ok){document.getElementById('err').textContent='Not found';return}
+  const p=await r.json();
+  document.getElementById('title').textContent=p.name;
+  let html='<p>Address: '+esc(p.address)+'</p>'
+    +'<p>City: '+esc(p.cityName)+', '+esc(p.countryName)+'</p>'
+    +'<p>Coordinates: '+p.latitude+', '+p.longitude+'</p>';
+  document.getElementById('detail').innerHTML=html;
+  document.getElementById('eventsSection').style.display='block';
+  loadEvents();
+})();
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function dateLabel(ds){
+  const d=new Date(ds);
+  const now=new Date();
+  const today=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+  const tmrw=new Date(today);tmrw.setDate(tmrw.getDate()+1);
+  const t2=new Date(d.getFullYear(),d.getMonth(),d.getDate());
+  if(t2.getTime()===today.getTime())return 'Today';
+  if(t2.getTime()===tmrw.getTime())return 'Tomorrow';
+  return d.getDate()+' '+d.toLocaleString('en',{month:'long'})+' '+d.getFullYear();
+}
+let evPage=1;const evLimit=20;let evLoading=false;let evDone=false;let lastDateLabel='';
+async function loadEvents(){
+  if(evLoading||evDone)return;
+  evLoading=true;
+  document.getElementById('loading').style.display='block';
+  const r=await fetch('/places/'+id+'/events?page='+evPage+'&limit='+evLimit);
+  if(!r.ok){evLoading=false;document.getElementById('loading').style.display='none';return}
+  const j=await r.json();
+  const list=document.getElementById('list');
+  for(const ev of j.data){
+    const lbl=dateLabel(ev.startDate);
+    if(lbl!==lastDateLabel){
+      lastDateLabel=lbl;
+      const h=document.createElement('h3');
+      h.style.margin='24px 0 12px';
+      h.textContent=lbl;
+      list.appendChild(h);
+    }
+    const d=document.createElement('div');
+    let evHtml='<a href="/view/event/'+ev.id+'"><b>'+esc(ev.title)+'</b></a><br>'
+      +esc(ev.description)+'<br>';
+    if(ev.organisationName)evHtml+='<small>Organisation: <a href="/view/organisation/'+ev.organisationId+'">'+esc(ev.organisationName)+'</a></small><br>';
+    evHtml+='<hr>';
+    d.innerHTML=evHtml;
+    list.appendChild(d);
+  }
+  if(evPage*evLimit>=j.total){evDone=true;document.getElementById('end').style.display='block'}
+  else{evPage++}
+  evLoading=false;
+  document.getElementById('loading').style.display=evDone?'none':'block';
+}
+window.addEventListener('scroll',()=>{
+  if(window.innerHeight+window.scrollY>=document.body.offsetHeight-200)loadEvents();
+});
 </script>
 </body></html>`);
 });
@@ -1833,33 +2014,6 @@ document.getElementById('f').onsubmit=async e=>{
   const r=await fetch('/events/'+eventId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('accessToken')},body:JSON.stringify(body)});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
   window.location.href='/view/event/'+eventId;
-};
-</script>
-</body></html>`);
-});
-
-app.get('/create-organisation', (_req: Request, res: Response) => {
-  res.type('html').send(`<!DOCTYPE html>
-<html><head><title>Create organisation</title>${PAGE_HEAD}</head><body>
-<div class="c">
-<h1>Create organisation</h1>
-${APP_NAV}
-<hr>
-<form id="f">
-Name<br><input type="text" name="name" minlength="1" maxlength="256" required><br><br>
-<button type="submit">Create</button>
-</form>
-<p id="err"></p>
-</div>
-<script>
-if(!localStorage.getItem('accessToken'))window.location.href='/login';
-try{const p=JSON.parse(atob(localStorage.getItem('accessToken').split('.')[1]));if(p.role!=='admin')window.location.href='/'}catch{window.location.href='/login'}
-document.getElementById('f').onsubmit=async e=>{
-  e.preventDefault();
-  const fd=Object.fromEntries(new FormData(e.target));
-  const r=await fetch('/organisations',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('accessToken')},body:JSON.stringify({name:fd.name})});
-  if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
-  window.location.href='/organisations-list';
 };
 </script>
 </body></html>`);
@@ -2271,7 +2425,7 @@ app.get('/profile', (_req: Request, res: Response) => {
 ${APP_NAV}
 <hr>
 <p>Nickname: <b id="nick"></b></p>
-<p>Email: <b id="email"></b></p>
+<p>Email: <b id="email"></b> <small>(visible only to you)</small></p>
 <br>
 <button id="logout">Log out</button>
 </div>
