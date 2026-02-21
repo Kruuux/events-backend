@@ -1,24 +1,34 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import pg from 'pg';
+import type { Server } from 'node:http';
+import { app, pool } from './index.js';
 
-const BASE_URL = process.env.BASE_URL ?? 'http://localhost:3000';
-let pool: pg.Pool;
+let server: Server;
+let baseUrl: string;
 
 before(async () => {
-  pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
   await pool.query(
     'TRUNCATE events, places, cities, countries, organisations, sessions, humans CASCADE',
   );
+  server = app.listen(0, () => {
+    const addr = server.address();
+    if (typeof addr === 'object' && addr) {
+      baseUrl = `http://localhost:${addr.port}`;
+    }
+  });
+  await new Promise<void>((resolve) => server.once('listening', resolve));
 });
 
 after(async () => {
+  await new Promise<void>((resolve, reject) =>
+    server.close((err) => (err ? reject(err) : resolve())),
+  );
   await pool.end();
 });
 
 describe('POST /api/v1/join', () => {
   it('returns 201 for valid data', async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/join`, {
+    const res = await fetch(`${baseUrl}/api/v1/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -33,7 +43,7 @@ describe('POST /api/v1/join', () => {
   });
 
   it('returns 400 when body is empty', async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/join`, {
+    const res = await fetch(`${baseUrl}/api/v1/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
@@ -45,7 +55,7 @@ describe('POST /api/v1/join', () => {
   });
 
   it('returns 400 when nickname is too short', async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/join`, {
+    const res = await fetch(`${baseUrl}/api/v1/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -62,7 +72,7 @@ describe('POST /api/v1/join', () => {
   });
 
   it('returns 400 when nickname is too long', async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/join`, {
+    const res = await fetch(`${baseUrl}/api/v1/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -79,7 +89,7 @@ describe('POST /api/v1/join', () => {
   });
 
   it('returns 400 when email is invalid', async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/join`, {
+    const res = await fetch(`${baseUrl}/api/v1/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -96,7 +106,7 @@ describe('POST /api/v1/join', () => {
   });
 
   it('returns 400 when password is too short', async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/join`, {
+    const res = await fetch(`${baseUrl}/api/v1/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -113,7 +123,7 @@ describe('POST /api/v1/join', () => {
   });
 
   it('returns 400 when password is too long', async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/join`, {
+    const res = await fetch(`${baseUrl}/api/v1/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -130,7 +140,7 @@ describe('POST /api/v1/join', () => {
   });
 
   it('returns 400 when role is invalid', async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/join`, {
+    const res = await fetch(`${baseUrl}/api/v1/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -147,7 +157,7 @@ describe('POST /api/v1/join', () => {
   });
 
   it('returns 409 when email is already taken', async () => {
-    await fetch(`${BASE_URL}/api/v1/join`, {
+    await fetch(`${baseUrl}/api/v1/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -158,7 +168,7 @@ describe('POST /api/v1/join', () => {
       }),
     });
 
-    const res = await fetch(`${BASE_URL}/api/v1/join`, {
+    const res = await fetch(`${baseUrl}/api/v1/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -175,7 +185,7 @@ describe('POST /api/v1/join', () => {
   });
 
   it('returns 409 when nickname is already taken', async () => {
-    await fetch(`${BASE_URL}/api/v1/join`, {
+    await fetch(`${baseUrl}/api/v1/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -186,7 +196,7 @@ describe('POST /api/v1/join', () => {
       }),
     });
 
-    const res = await fetch(`${BASE_URL}/api/v1/join`, {
+    const res = await fetch(`${baseUrl}/api/v1/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -205,7 +215,7 @@ describe('POST /api/v1/join', () => {
 
 describe('POST /api/v1/enter', () => {
   it('returns 200 with accessToken and refreshToken for valid credentials', async () => {
-    await fetch(`${BASE_URL}/api/v1/join`, {
+    await fetch(`${baseUrl}/api/v1/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -216,7 +226,7 @@ describe('POST /api/v1/enter', () => {
       }),
     });
 
-    const res = await fetch(`${BASE_URL}/api/v1/enter`, {
+    const res = await fetch(`${baseUrl}/api/v1/enter`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -232,7 +242,7 @@ describe('POST /api/v1/enter', () => {
   });
 
   it('returns 400 when body is empty', async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/enter`, {
+    const res = await fetch(`${baseUrl}/api/v1/enter`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
@@ -244,7 +254,7 @@ describe('POST /api/v1/enter', () => {
   });
 
   it('returns 400 when email is invalid', async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/enter`, {
+    const res = await fetch(`${baseUrl}/api/v1/enter`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -259,7 +269,7 @@ describe('POST /api/v1/enter', () => {
   });
 
   it('returns 401 when email does not exist', async () => {
-    const res = await fetch(`${BASE_URL}/api/v1/enter`, {
+    const res = await fetch(`${baseUrl}/api/v1/enter`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -274,7 +284,7 @@ describe('POST /api/v1/enter', () => {
   });
 
   it('returns 401 when password is wrong', async () => {
-    await fetch(`${BASE_URL}/api/v1/join`, {
+    await fetch(`${baseUrl}/api/v1/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -285,7 +295,7 @@ describe('POST /api/v1/enter', () => {
       }),
     });
 
-    const res = await fetch(`${BASE_URL}/api/v1/enter`, {
+    const res = await fetch(`${baseUrl}/api/v1/enter`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

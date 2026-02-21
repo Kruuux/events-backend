@@ -2519,8 +2519,15 @@ app.get('/docs', (_req: Request, res: Response) => {
 </body></html>`);
 });
 
-await validateMigrations(pool);
+export { app, pool };
 
-app.listen(PORT, () => {
-  console.log(`listening on :${PORT}`);
-});
+const isMain =
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === path.resolve(import.meta.filename);
+
+if (isMain) {
+  await validateMigrations(pool);
+  app.listen(PORT, () => {
+    console.log(`listening on :${PORT}`);
+  });
+}
