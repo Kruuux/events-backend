@@ -681,10 +681,9 @@ app.get(
     const offset = (page - 1) * limit;
 
     const [countResult, rows] = await Promise.all([
-      pool.query(
-        'SELECT COUNT(*) FROM events WHERE organisation_id = $1',
-        [organisationId],
-      ),
+      pool.query('SELECT COUNT(*) FROM events WHERE organisation_id = $1', [
+        organisationId,
+      ]),
       pool.query(
         `SELECT e.id, e.human_id AS "humanId", e.organisation_id AS "organisationId",
                 e.title, e.description, e.latitude, e.longitude,
