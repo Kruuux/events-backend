@@ -693,18 +693,21 @@ app.delete('/events/:id', async (req: Request, res: Response) => {
 
 // --- pages ---
 
+const PAGE_STYLE = `*{margin:0;padding:0;box-sizing:border-box}body{background:#fff;color:#000;font-family:monospace;font-size:16px}.c{max-width:1000px;margin:0 auto;padding:24px 16px}a{color:#000}nav{margin:8px 0 16px}hr{border:none;border-top:1px solid #000;margin:16px 0}input,select{border:1px solid #000;padding:6px;margin:4px 0 12px;width:100%;font-family:monospace;font-size:16px}button{border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer}#err{font-weight:bold;margin-top:12px}`;
+const PAGE_HEAD = `<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${PAGE_STYLE}</style>`;
+const APP_NAV = `<nav>[<a href="/">Events</a>] [<a href="/create-event">Create event</a>] [<a href="/profile">Profile</a>]</nav>`;
+
 app.get('/', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>
-<html><head>
-<title>Events</title>
-<style>body{background:#fff;color:#000;max-width:600px;margin:40px auto;padding:0 16px}a{color:#000}hr{border:none;border-top:1px solid #000}#end{display:none}</style>
-</head><body>
+<html><head><title>Events</title>${PAGE_HEAD}<style>#end{display:none}</style></head><body>
+<div class="c">
 <h1>Events</h1>
-<p>[<a href="/create-event">Create event</a>] [<a href="/profile">Profile</a>]</p>
+${APP_NAV}
 <hr>
 <div id="list"></div>
 <p id="loading">Loading...</p>
 <p id="end">---</p>
+</div>
 <script>
 if(!localStorage.getItem('accessToken'))window.location.href='/login';
 let page=1;const limit=20;let loading=false;let done=false;
@@ -739,16 +742,16 @@ load();
 
 app.get('/profile', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>
-<html><head>
-<title>Profile</title>
-<style>body{background:#fff;color:#000;max-width:360px;margin:80px auto;padding:0 16px}a{color:#000}button{border:1px solid #000;background:#fff;color:#000;padding:4px 12px;cursor:pointer}</style>
-</head><body>
+<html><head><title>Profile</title>${PAGE_HEAD}</head><body>
+<div class="c">
 <h1>Profile</h1>
-<p>[<a href="/">Events</a>]</p>
+${APP_NAV}
+<hr>
 <p>Nickname: <b id="nick"></b></p>
 <p>Email: <b id="email"></b></p>
 <br>
 <button id="logout">Log out</button>
+</div>
 <script>
 const t=localStorage.getItem('accessToken');
 if(!t){window.location.href='/login'}
@@ -764,12 +767,11 @@ document.getElementById('logout').onclick=()=>{
 
 app.get('/create-event', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>
-<html><head>
-<title>Create event</title>
-<style>body{background:#fff;color:#000;max-width:360px;margin:80px auto;padding:0 16px}a{color:#000}input{border:1px solid #000;padding:4px;margin:2px 0 8px;width:100%;box-sizing:border-box}button{border:1px solid #000;background:#fff;color:#000;padding:4px 12px;cursor:pointer}#err{font-weight:bold}</style>
-</head><body>
+<html><head><title>Create event</title>${PAGE_HEAD}</head><body>
+<div class="c">
 <h1>Create event</h1>
-<p>[<a href="/">Events</a>] [<a href="/profile">Profile</a>]</p>
+${APP_NAV}
+<hr>
 <form id="f">
 Title<br><input type="text" name="title" required><br>
 Description<br><input type="text" name="description" required><br>
@@ -781,6 +783,7 @@ Organisation ID (optional)<br><input type="number" name="organisationId"><br><br
 <button type="submit">Create</button>
 </form>
 <p id="err"></p>
+</div>
 <script>
 if(!localStorage.getItem('accessToken'))window.location.href='/login';
 document.getElementById('f').onsubmit=async e=>{
@@ -798,18 +801,18 @@ document.getElementById('f').onsubmit=async e=>{
 
 app.get('/login', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>
-<html><head>
-<title>Login</title>
-<style>body{background:#fff;color:#000;max-width:360px;margin:80px auto;padding:0 16px}a{color:#000}input{border:1px solid #000;padding:4px;margin:2px 0 8px;width:100%;box-sizing:border-box}button{border:1px solid #000;background:#fff;color:#000;padding:4px 12px;cursor:pointer}#err{font-weight:bold}</style>
-</head><body>
+<html><head><title>Login</title>${PAGE_HEAD}</head><body>
+<div class="c">
 <h1>Login</h1>
+<nav>[<a href="/signup">Sign up</a>]</nav>
+<hr>
 <form id="f">
 Email<br><input type="email" name="email" required><br>
 Password<br><input type="password" name="password" required><br>
 <button type="submit">Log in</button>
 </form>
-<p><a href="/signup">Sign up</a></p>
 <p id="err"></p>
+</div>
 <script>
 document.getElementById('f').onsubmit=async e=>{
   e.preventDefault();
@@ -827,11 +830,11 @@ document.getElementById('f').onsubmit=async e=>{
 
 app.get('/signup', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>
-<html><head>
-<title>Sign up</title>
-<style>body{background:#fff;color:#000;max-width:360px;margin:80px auto;padding:0 16px}a{color:#000}input,select{border:1px solid #000;padding:4px;margin:2px 0 8px;width:100%;box-sizing:border-box}button{border:1px solid #000;background:#fff;color:#000;padding:4px 12px;cursor:pointer}#err{font-weight:bold}</style>
-</head><body>
+<html><head><title>Sign up</title>${PAGE_HEAD}</head><body>
+<div class="c">
 <h1>Sign up</h1>
+<nav>[<a href="/login">Log in</a>]</nav>
+<hr>
 <form id="f">
 Nickname<br><input type="text" name="nickname" minlength="2" maxlength="32" required><br>
 Email<br><input type="email" name="email" required><br>
@@ -839,8 +842,8 @@ Password<br><input type="password" name="password" minlength="8" maxlength="128"
 Role<br><select name="role"><option value="member">Member</option><option value="admin">Admin</option></select><br><br>
 <button type="submit">Sign up</button>
 </form>
-<p><a href="/login">Log in</a></p>
 <p id="err"></p>
+</div>
 <script>
 document.getElementById('f').onsubmit=async e=>{
   e.preventDefault();
