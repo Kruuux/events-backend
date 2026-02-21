@@ -1,7 +1,7 @@
 CREATE TABLE events (
-  id SERIAL PRIMARY KEY,
-  human_id INTEGER NOT NULL REFERENCES humans(id) ON DELETE CASCADE,
-  organisation_id INTEGER REFERENCES organisations(id) ON DELETE SET NULL,
+  id TEXT PRIMARY KEY,
+  human_id TEXT NOT NULL REFERENCES humans(id) ON DELETE CASCADE,
+  organisation_id TEXT REFERENCES organisations(id) ON DELETE SET NULL,
   title VARCHAR(256) NOT NULL,
   description TEXT NOT NULL,
   latitude DOUBLE PRECISION NOT NULL,

@@ -55,15 +55,15 @@ function hashToken(token: string): string {
 }
 
 async function createSession(
-  humanId: number,
+  humanId: string,
   expiresAt: Date,
 ): Promise<string> {
   const refreshToken = jwt.sign({ sub: humanId, type: 'refresh' }, JWT_SECRET, {
     expiresIn: '1h',
   });
   await pool.query(
-    'INSERT INTO sessions (human_id, token_hash, expires_at) VALUES ($1, $2, $3)',
-    [humanId, hashToken(refreshToken), expiresAt],
+    'INSERT INTO sessions (id, human_id, token_hash, expires_at) VALUES ($1, $2, $3, $4)',
+    [crypto.randomUUID(), humanId, hashToken(refreshToken), expiresAt],
   );
   return refreshToken;
 }
@@ -80,8 +80,10 @@ function authenticate(req: Request): jwt.JwtPayload | null {
   }
 }
 
+const UuidSchema = v.pipe(v.string(), v.uuid());
+
 const IdParamSchema = v.object({
-  id: v.pipe(v.string(), v.regex(/^\d+$/)),
+  id: UuidSchema,
 });
 
 const PaginationSchema = v.object({
@@ -134,8 +136,8 @@ app.post('/join', async (req: Request, res: Response) => {
   });
 
   await pool.query(
-    'INSERT INTO humans (nickname, email, password_hash, salt, role) VALUES ($1, $2, $3, $4, $5)',
-    [nickname, email, hash, salt, role],
+    'INSERT INTO humans (id, nickname, email, password_hash, salt, role) VALUES ($1, $2, $3, $4, $5, $6)',
+    [crypto.randomUUID(), nickname, email, hash, salt, role],
   );
 
   res.status(201).end();
@@ -177,12 +179,17 @@ app.post('/enter', async (req: Request, res: Response) => {
   }
 
   const accessToken = jwt.sign(
-    { sub: human.id, role: human.role, nickname: human.nickname, email: human.email },
+    {
+      sub: human.id,
+      role: human.role,
+      nickname: human.nickname,
+      email: human.email,
+    },
     JWT_SECRET,
     { expiresIn: '15m' },
   );
   const refreshToken = await createSession(
-    human.id as number,
+    human.id as string,
     new Date(Date.now() + 60 * 60 * 1000),
   );
 
@@ -221,7 +228,7 @@ app.post('/refresh', async (req: Request, res: Response) => {
     return;
   }
 
-  const humanId = session.rows[0]!.human_id as number;
+  const humanId = session.rows[0]!.human_id as string;
 
   const humanResult = await pool.query(
     'SELECT nickname, email, role FROM humans WHERE id = $1',
@@ -283,30 +290,42 @@ app.post('/organisations', async (req: Request, res: Response) => {
     return;
   }
 
+  const orgId = crypto.randomUUID();
   const row = await pool.query(
-    `INSERT INTO organisations (human_id, name)
-     VALUES ($1, $2)
+    `INSERT INTO organisations (id, human_id, name)
+     VALUES ($1, $2, $3)
      RETURNING id, human_id AS "humanId", name, created_at AS "createdAt"`,
-    [payload.sub, data.name],
+    [orgId, payload.sub, data.name],
   );
 
   res.status(201).json(row.rows[0]);
 });
 
+const OrganisationListSchema = v.object({
+  page: v.optional(v.pipe(v.string(), v.regex(/^\d+$/)), '1'),
+  limit: v.optional(v.pipe(v.string(), v.regex(/^\d+$/)), '20'),
+  name: v.optional(v.string()),
+});
+
 app.get('/organisations', async (req: Request, res: Response) => {
-  const query = validate(PaginationSchema, req.query, res);
+  const query = validate(OrganisationListSchema, req.query, res);
   if (!query) return;
 
   const page = Math.max(1, Number(query.page));
   const limit = Math.min(100, Math.max(1, Number(query.limit)));
   const offset = (page - 1) * limit;
 
+  const where = query.name ? `WHERE name ILIKE '%' || $3 || '%'` : '';
+  const params = query.name ? [limit, offset, query.name] : [limit, offset];
+  const countParams = query.name ? [query.name] : [];
+  const countWhere = query.name ? `WHERE name ILIKE '%' || $1 || '%'` : '';
+
   const [countResult, rows] = await Promise.all([
-    pool.query('SELECT COUNT(*) FROM organisations'),
+    pool.query(`SELECT COUNT(*) FROM organisations ${countWhere}`, countParams),
     pool.query(
       `SELECT id, human_id AS "humanId", name, created_at AS "createdAt"
-       FROM organisations ORDER BY name ASC LIMIT $1 OFFSET $2`,
-      [limit, offset],
+       FROM organisations ${where} ORDER BY name ASC LIMIT $1 OFFSET $2`,
+      params,
     ),
   ]);
 
@@ -315,8 +334,26 @@ app.get('/organisations', async (req: Request, res: Response) => {
   res.status(200).json({ data: rows.rows, total, page, limit });
 });
 
+app.get('/organisations/:id', async (req: Request, res: Response) => {
+  const params = validate(IdParamSchema, req.params, res);
+  if (!params) return;
+
+  const row = await pool.query(
+    `SELECT id, human_id AS "humanId", name, created_at AS "createdAt"
+     FROM organisations WHERE id = $1`,
+    [params.id],
+  );
+
+  if (row.rows.length === 0) {
+    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+    return;
+  }
+
+  res.status(200).json(row.rows[0]);
+});
+
 const UpdateOrganisationSchema = v.object({
-  id: v.pipe(v.string(), v.regex(/^\d+$/)),
+  id: UuidSchema,
   name: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
 });
 
@@ -334,8 +371,14 @@ app.put('/organisations/:id', async (req: Request, res: Response) => {
     return;
   }
   if (payload.role !== 'admin') {
-    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
-    return;
+    const organiserCheck = await pool.query(
+      'SELECT id FROM organisers WHERE human_id = $1 AND organisation_id = $2',
+      [payload.sub, data.id],
+    );
+    if (organiserCheck.rows.length === 0) {
+      res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+      return;
+    }
   }
 
   const nameCheck = await pool.query(
@@ -391,13 +434,13 @@ app.delete('/organisations/:id', async (req: Request, res: Response) => {
 // --- organisers ---
 
 const AssignOrganiserSchema = v.object({
-  organisationId: v.pipe(v.string(), v.regex(/^\d+$/)),
-  humanId: v.number(),
+  organisationId: UuidSchema,
+  humanId: UuidSchema,
 });
 
 const UnassignOrganiserSchema = v.object({
-  organisationId: v.pipe(v.string(), v.regex(/^\d+$/)),
-  humanId: v.pipe(v.string(), v.regex(/^\d+$/)),
+  organisationId: UuidSchema,
+  humanId: UuidSchema,
 });
 
 app.post(
@@ -447,10 +490,10 @@ app.post(
     }
 
     const row = await pool.query(
-      `INSERT INTO organisers (human_id, organisation_id)
-       VALUES ($1, $2)
+      `INSERT INTO organisers (id, human_id, organisation_id)
+       VALUES ($1, $2, $3)
        RETURNING id, human_id AS "humanId", organisation_id AS "organisationId", created_at AS "createdAt"`,
-      [data.humanId, data.organisationId],
+      [crypto.randomUUID(), data.humanId, data.organisationId],
     );
 
     res.status(201).json(row.rows[0]);
@@ -504,6 +547,28 @@ app.delete(
   },
 );
 
+app.get(
+  '/organisations/:organisationId/organisers/check',
+  async (req: Request, res: Response) => {
+    const humanId = req.query.humanId as string;
+    if (!humanId) {
+      res
+        .status(400)
+        .json({
+          code: 'VALIDATION_EXCEPTION',
+          violations: [{ property: 'humanId', message: 'Required' }],
+        });
+      return;
+    }
+    const organisationId = req.params.organisationId;
+    const row = await pool.query(
+      'SELECT id FROM organisers WHERE human_id = $1 AND organisation_id = $2',
+      [humanId, organisationId],
+    );
+    res.status(200).json({ isOrganiser: row.rows.length > 0 });
+  },
+);
+
 // --- events ---
 
 const CreateEventSchema = v.object({
@@ -513,7 +578,7 @@ const CreateEventSchema = v.object({
   longitude: v.pipe(v.number(), v.minValue(-180), v.maxValue(180)),
   startDate: v.pipe(v.string(), v.isoTimestamp()),
   endDate: v.pipe(v.string(), v.isoTimestamp()),
-  organisationId: v.optional(v.number()),
+  organisationId: v.optional(UuidSchema),
 });
 
 app.post('/events', async (req: Request, res: Response) => {
@@ -548,11 +613,13 @@ app.post('/events', async (req: Request, res: Response) => {
     }
   }
 
+  const eventId = crypto.randomUUID();
   const row = await pool.query(
-    `INSERT INTO events (human_id, organisation_id, title, description, latitude, longitude, start_date, end_date)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    `INSERT INTO events (id, human_id, organisation_id, title, description, latitude, longitude, start_date, end_date)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      RETURNING id, human_id AS "humanId", organisation_id AS "organisationId", title, description, latitude, longitude, start_date AS "startDate", end_date AS "endDate", created_at AS "createdAt"`,
     [
+      eventId,
       payload.sub,
       data.organisationId ?? null,
       data.title,
@@ -608,14 +675,14 @@ app.get('/events/:id', async (req: Request, res: Response) => {
 });
 
 const UpdateEventSchema = v.object({
-  id: v.pipe(v.string(), v.regex(/^\d+$/)),
+  id: UuidSchema,
   title: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
   description: v.string(),
   latitude: v.pipe(v.number(), v.minValue(-90), v.maxValue(90)),
   longitude: v.pipe(v.number(), v.minValue(-180), v.maxValue(180)),
   startDate: v.pipe(v.string(), v.isoTimestamp()),
   endDate: v.pipe(v.string(), v.isoTimestamp()),
-  organisationId: v.optional(v.nullable(v.number())),
+  organisationId: v.optional(v.nullable(UuidSchema)),
 });
 
 app.put('/events/:id', async (req: Request, res: Response) => {
@@ -628,6 +695,31 @@ app.put('/events/:id', async (req: Request, res: Response) => {
     return;
   }
 
+  const existing = await pool.query(
+    'SELECT human_id, organisation_id FROM events WHERE id = $1',
+    [data.id],
+  );
+  if (existing.rows.length === 0) {
+    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+    return;
+  }
+
+  const ev = existing.rows[0]!;
+  if (payload.role !== 'admin' && payload.sub !== ev.human_id) {
+    if (!ev.organisation_id) {
+      res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
+      return;
+    }
+    const organiserCheck = await pool.query(
+      'SELECT id FROM organisers WHERE human_id = $1 AND organisation_id = $2',
+      [payload.sub, ev.organisation_id],
+    );
+    if (organiserCheck.rows.length === 0) {
+      res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
+      return;
+    }
+  }
+
   if (data.organisationId != null) {
     const orgCheck = await pool.query(
       'SELECT id FROM organisations WHERE id = $1',
@@ -636,17 +728,6 @@ app.put('/events/:id', async (req: Request, res: Response) => {
     if (orgCheck.rows.length === 0) {
       res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
       return;
-    }
-
-    if (payload.role !== 'admin') {
-      const organiserCheck = await pool.query(
-        'SELECT id FROM organisers WHERE human_id = $1 AND organisation_id = $2',
-        [payload.sub, data.organisationId],
-      );
-      if (organiserCheck.rows.length === 0) {
-        res.status(403).json({ code: 'NOT_ORGANISER_EXCEPTION' });
-        return;
-      }
     }
   }
 
@@ -666,11 +747,6 @@ app.put('/events/:id', async (req: Request, res: Response) => {
     ],
   );
 
-  if (row.rows.length === 0) {
-    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
-    return;
-  }
-
   res.status(200).json(row.rows[0]);
 });
 
@@ -678,24 +754,77 @@ app.delete('/events/:id', async (req: Request, res: Response) => {
   const params = validate(IdParamSchema, req.params, res);
   if (!params) return;
 
-  const row = await pool.query(
-    'DELETE FROM events WHERE id = $1 RETURNING id',
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+
+  const existing = await pool.query(
+    'SELECT human_id, organisation_id FROM events WHERE id = $1',
     [params.id],
   );
-
-  if (row.rows.length === 0) {
+  if (existing.rows.length === 0) {
     res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
     return;
   }
+
+  const ev = existing.rows[0]!;
+  if (payload.role !== 'admin' && payload.sub !== ev.human_id) {
+    if (!ev.organisation_id) {
+      res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
+      return;
+    }
+    const organiserCheck = await pool.query(
+      'SELECT id FROM organisers WHERE human_id = $1 AND organisation_id = $2',
+      [payload.sub, ev.organisation_id],
+    );
+    if (organiserCheck.rows.length === 0) {
+      res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
+      return;
+    }
+  }
+
+  await pool.query('DELETE FROM events WHERE id = $1', [params.id]);
 
   res.status(200).end();
 });
 
 // --- pages ---
 
-const PAGE_STYLE = `*{margin:0;padding:0;box-sizing:border-box}body{background:#fff;color:#000;font-family:monospace;font-size:16px}.c{max-width:1000px;margin:0 auto;padding:24px 16px}a{color:#000}nav{margin:8px 0 16px}hr{border:none;border-top:1px solid #000;margin:16px 0}input,select{border:1px solid #000;padding:6px;margin:4px 0 12px;width:100%;font-family:monospace;font-size:16px}button{border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer}#err{font-weight:bold;margin-top:12px}`;
+const PAGE_STYLE = `*{margin:0;padding:0;box-sizing:border-box}body{background:#fff;color:#000;font-family:monospace;font-size:16px}.c{max-width:1000px;margin:0 auto;padding:24px 16px}a{color:#000}nav{margin:8px 0 16px}hr{border:none;border-top:1px solid #000;margin:16px 0}input,select{border:1px solid #000;padding:6px;margin:4px 0 12px;width:100%;font-family:monospace;font-size:16px}button{border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer}#err{font-weight:bold;margin-top:12px}.dropdown{border:1px solid #000;max-height:150px;overflow-y:auto;display:none}.dropdown div{padding:4px 6px;cursor:pointer}.dropdown div:hover{background:#000;color:#fff}`;
 const PAGE_HEAD = `<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${PAGE_STYLE}</style>`;
-const APP_NAV = `<nav>[<a href="/">Events</a>] [<a href="/create-event">Create event</a>] [<a href="/profile">Profile</a>]</nav>`;
+const NAV_SCRIPT = `<script>
+(function(){const t=localStorage.getItem('accessToken');if(!t)return;
+try{const p=JSON.parse(atob(t.split('.')[1]));
+if(p.role==='admin'){const s=document.getElementById('adminNav');if(s)s.style.display='inline'}}catch{}})();
+</script>`;
+const APP_NAV = `<nav>[<a href="/">Events</a>] [<a href="/organisations-list">Organisations</a>] [<a href="/create-event">Create event</a>] <span id="adminNav" style="display:none">[<a href="/create-organisation">Create organisation</a>] </span>[<a href="/profile">Profile</a>]</nav>${NAV_SCRIPT}`;
+
+const ORG_SEARCH_HTML = `Organisation (optional)<br><input type="text" id="orgSearch" placeholder="Search by name..." autocomplete="off"><input type="hidden" name="organisationId" id="orgId"><div class="dropdown" id="orgDrop"></div>`;
+const ORG_SEARCH_SCRIPT = `
+let debounce;
+document.getElementById('orgSearch').oninput=function(){
+  clearTimeout(debounce);
+  const v=this.value;
+  const drop=document.getElementById('orgDrop');
+  if(v.length<2){drop.style.display='none';document.getElementById('orgId').value='';return}
+  debounce=setTimeout(async()=>{
+    const r=await fetch('/organisations?name='+encodeURIComponent(v)+'&limit=10');
+    if(!r.ok)return;
+    const j=await r.json();
+    drop.innerHTML='';
+    if(j.data.length===0){drop.style.display='none';return}
+    for(const o of j.data){
+      const d=document.createElement('div');
+      d.textContent=o.name;
+      d.onclick=()=>{document.getElementById('orgSearch').value=o.name;document.getElementById('orgId').value=o.id;drop.style.display='none'};
+      drop.appendChild(d);
+    }
+    drop.style.display='block';
+  },300);
+};
+document.addEventListener('click',e=>{if(!e.target.closest('#orgSearch,#orgDrop'))document.getElementById('orgDrop').style.display='none'});`;
 
 app.get('/', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>
@@ -721,7 +850,7 @@ async function load(){
   const list=document.getElementById('list');
   for(const ev of j.data){
     const d=document.createElement('div');
-    d.innerHTML='<b>'+esc(ev.title)+'</b><br>'
+    d.innerHTML='<a href="/view/event/'+ev.id+'"><b>'+esc(ev.title)+'</b></a><br>'
       +esc(ev.description)+'<br>'
       +'<small>'+new Date(ev.startDate).toLocaleString()+' - '+new Date(ev.endDate).toLocaleString()+'</small><hr>';
     list.appendChild(d);
@@ -736,6 +865,274 @@ window.addEventListener('scroll',()=>{
   if(window.innerHeight+window.scrollY>=document.body.offsetHeight-200)load();
 });
 load();
+</script>
+</body></html>`);
+});
+
+app.get('/organisations-list', (_req: Request, res: Response) => {
+  res.type('html').send(`<!DOCTYPE html>
+<html><head><title>Organisations</title>${PAGE_HEAD}<style>#end{display:none}</style></head><body>
+<div class="c">
+<h1>Organisations</h1>
+${APP_NAV}
+<hr>
+<div id="list"></div>
+<p id="loading">Loading...</p>
+<p id="end">---</p>
+</div>
+<script>
+if(!localStorage.getItem('accessToken'))window.location.href='/login';
+let page=1;const limit=20;let loading=false;let done=false;
+async function load(){
+  if(loading||done)return;
+  loading=true;
+  document.getElementById('loading').style.display='block';
+  const r=await fetch('/organisations?page='+page+'&limit='+limit);
+  if(!r.ok){loading=false;document.getElementById('loading').style.display='none';return}
+  const j=await r.json();
+  const list=document.getElementById('list');
+  for(const o of j.data){
+    const d=document.createElement('div');
+    d.innerHTML='<a href="/view/organisation/'+o.id+'"><b>'+esc(o.name)+'</b></a><br>'
+      +'<small>Created: '+new Date(o.createdAt).toLocaleString()+'</small><hr>';
+    list.appendChild(d);
+  }
+  if(page*limit>=j.total){done=true;document.getElementById('end').style.display='block'}
+  else{page++}
+  loading=false;
+  document.getElementById('loading').style.display=done?'none':'block';
+}
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+window.addEventListener('scroll',()=>{
+  if(window.innerHeight+window.scrollY>=document.body.offsetHeight-200)load();
+});
+load();
+</script>
+</body></html>`);
+});
+
+app.get('/view/event/:id', (_req: Request, res: Response) => {
+  res.type('html').send(`<!DOCTYPE html>
+<html><head><title>Event</title>${PAGE_HEAD}</head><body>
+<div class="c">
+<h1 id="title">Event</h1>
+${APP_NAV}
+<hr>
+<div id="detail"></div>
+<p id="err"></p>
+</div>
+<script>
+if(!localStorage.getItem('accessToken'))window.location.href='/login';
+const id=window.location.pathname.split('/').pop();
+const t=localStorage.getItem('accessToken');
+let me={};
+try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
+(async()=>{
+  const r=await fetch('/events/'+id);
+  if(!r.ok){document.getElementById('err').textContent='Not found';return}
+  const ev=await r.json();
+  document.getElementById('title').textContent=ev.title;
+  let html='<p>'+esc(ev.description)+'</p>'
+    +'<p>Latitude: '+ev.latitude+'</p>'
+    +'<p>Longitude: '+ev.longitude+'</p>'
+    +'<p>Start: '+new Date(ev.startDate).toLocaleString()+'</p>'
+    +'<p>End: '+new Date(ev.endDate).toLocaleString()+'</p>'
+    +'<p>Created: '+new Date(ev.createdAt).toLocaleString()+'</p>';
+  if(ev.organisationId)html+='<p>Organisation: <a href="/view/organisation/'+ev.organisationId+'">'+ev.organisationId+'</a></p>';
+  let canEdit=me.role==='admin'||me.sub===ev.humanId;
+  if(!canEdit&&ev.organisationId){
+    const cr=await fetch('/organisations/'+ev.organisationId+'/organisers/check?humanId='+me.sub);
+    if(cr.ok){const cj=await cr.json();canEdit=cj.isOrganiser}
+  }
+  if(canEdit)html+='<br><a href="/edit/event/'+ev.id+'">[edit]</a>';
+  document.getElementById('detail').innerHTML=html;
+})();
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+</script>
+</body></html>`);
+});
+
+app.get('/view/organisation/:id', (_req: Request, res: Response) => {
+  res.type('html').send(`<!DOCTYPE html>
+<html><head><title>Organisation</title>${PAGE_HEAD}</head><body>
+<div class="c">
+<h1 id="title">Organisation</h1>
+${APP_NAV}
+<hr>
+<div id="detail"></div>
+<p id="err"></p>
+</div>
+<script>
+if(!localStorage.getItem('accessToken'))window.location.href='/login';
+const id=window.location.pathname.split('/').pop();
+const t=localStorage.getItem('accessToken');
+let me={};
+try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
+(async()=>{
+  const r=await fetch('/organisations/'+id);
+  if(!r.ok){document.getElementById('err').textContent='Not found';return}
+  const o=await r.json();
+  document.getElementById('title').textContent=o.name;
+  let html='<p>Name: '+esc(o.name)+'</p>'
+    +'<p>Created: '+new Date(o.createdAt).toLocaleString()+'</p>';
+  let canEdit=me.role==='admin';
+  if(!canEdit){
+    const cr=await fetch('/organisations/'+id+'/organisers/check?humanId='+me.sub);
+    if(cr.ok){const cj=await cr.json();canEdit=cj.isOrganiser}
+  }
+  if(canEdit)html+='<br><a href="/edit/organisation/'+o.id+'">[edit]</a>';
+  document.getElementById('detail').innerHTML=html;
+})();
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+</script>
+</body></html>`);
+});
+
+app.get('/create-event', (_req: Request, res: Response) => {
+  res.type('html').send(`<!DOCTYPE html>
+<html><head><title>Create event</title>${PAGE_HEAD}</head><body>
+<div class="c">
+<h1>Create event</h1>
+${APP_NAV}
+<hr>
+<form id="f">
+Title<br><input type="text" name="title" required><br>
+Description<br><input type="text" name="description" required><br>
+Latitude<br><input type="number" name="latitude" step="any" min="-90" max="90" required><br>
+Longitude<br><input type="number" name="longitude" step="any" min="-180" max="180" required><br>
+Start<br><input type="datetime-local" name="startDate" required><br>
+End<br><input type="datetime-local" name="endDate" required><br>
+${ORG_SEARCH_HTML}<br>
+<button type="submit">Create</button>
+</form>
+<p id="err"></p>
+</div>
+<script>
+if(!localStorage.getItem('accessToken'))window.location.href='/login';
+${ORG_SEARCH_SCRIPT}
+document.getElementById('f').onsubmit=async e=>{
+  e.preventDefault();
+  const fd=Object.fromEntries(new FormData(e.target));
+  const body={title:fd.title,description:fd.description,latitude:Number(fd.latitude),longitude:Number(fd.longitude),startDate:new Date(fd.startDate).toISOString(),endDate:new Date(fd.endDate).toISOString()};
+  if(fd.organisationId)body.organisationId=fd.organisationId;
+  const r=await fetch('/events',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('accessToken')},body:JSON.stringify(body)});
+  if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+  window.location.href='/';
+};
+</script>
+</body></html>`);
+});
+
+app.get('/edit/event/:id', (_req: Request, res: Response) => {
+  res.type('html').send(`<!DOCTYPE html>
+<html><head><title>Edit event</title>${PAGE_HEAD}</head><body>
+<div class="c">
+<h1>Edit event</h1>
+${APP_NAV}
+<hr>
+<form id="f">
+Title<br><input type="text" name="title" required><br>
+Description<br><input type="text" name="description" required><br>
+Latitude<br><input type="number" name="latitude" step="any" min="-90" max="90" required><br>
+Longitude<br><input type="number" name="longitude" step="any" min="-180" max="180" required><br>
+Start<br><input type="datetime-local" name="startDate" required><br>
+End<br><input type="datetime-local" name="endDate" required><br>
+${ORG_SEARCH_HTML}<br>
+<button type="submit">Update</button>
+</form>
+<p id="err"></p>
+</div>
+<script>
+if(!localStorage.getItem('accessToken'))window.location.href='/login';
+const eventId=window.location.pathname.split('/').pop();
+${ORG_SEARCH_SCRIPT}
+(async()=>{
+  const r=await fetch('/events/'+eventId);
+  if(!r.ok){document.getElementById('err').textContent='Not found';return}
+  const ev=await r.json();
+  const f=document.getElementById('f');
+  f.title.value=ev.title;
+  f.description.value=ev.description;
+  f.latitude.value=ev.latitude;
+  f.longitude.value=ev.longitude;
+  f.startDate.value=ev.startDate.slice(0,16);
+  f.endDate.value=ev.endDate.slice(0,16);
+  if(ev.organisationId){
+    document.getElementById('orgId').value=ev.organisationId;
+    const or=await fetch('/organisations/'+ev.organisationId);
+    if(or.ok){const oj=await or.json();document.getElementById('orgSearch').value=oj.name}
+  }
+})();
+document.getElementById('f').onsubmit=async e=>{
+  e.preventDefault();
+  const fd=Object.fromEntries(new FormData(e.target));
+  const body={title:fd.title,description:fd.description,latitude:Number(fd.latitude),longitude:Number(fd.longitude),startDate:new Date(fd.startDate).toISOString(),endDate:new Date(fd.endDate).toISOString()};
+  if(fd.organisationId)body.organisationId=fd.organisationId;
+  else body.organisationId=null;
+  const r=await fetch('/events/'+eventId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('accessToken')},body:JSON.stringify(body)});
+  if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+  window.location.href='/view/event/'+eventId;
+};
+</script>
+</body></html>`);
+});
+
+app.get('/create-organisation', (_req: Request, res: Response) => {
+  res.type('html').send(`<!DOCTYPE html>
+<html><head><title>Create organisation</title>${PAGE_HEAD}</head><body>
+<div class="c">
+<h1>Create organisation</h1>
+${APP_NAV}
+<hr>
+<form id="f">
+Name<br><input type="text" name="name" minlength="1" maxlength="256" required><br><br>
+<button type="submit">Create</button>
+</form>
+<p id="err"></p>
+</div>
+<script>
+if(!localStorage.getItem('accessToken'))window.location.href='/login';
+try{const p=JSON.parse(atob(localStorage.getItem('accessToken').split('.')[1]));if(p.role!=='admin')window.location.href='/'}catch{window.location.href='/login'}
+document.getElementById('f').onsubmit=async e=>{
+  e.preventDefault();
+  const fd=Object.fromEntries(new FormData(e.target));
+  const r=await fetch('/organisations',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('accessToken')},body:JSON.stringify({name:fd.name})});
+  if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+  window.location.href='/organisations-list';
+};
+</script>
+</body></html>`);
+});
+
+app.get('/edit/organisation/:id', (_req: Request, res: Response) => {
+  res.type('html').send(`<!DOCTYPE html>
+<html><head><title>Edit organisation</title>${PAGE_HEAD}</head><body>
+<div class="c">
+<h1>Edit organisation</h1>
+${APP_NAV}
+<hr>
+<form id="f">
+Name<br><input type="text" name="name" minlength="1" maxlength="256" required><br><br>
+<button type="submit">Update</button>
+</form>
+<p id="err"></p>
+</div>
+<script>
+if(!localStorage.getItem('accessToken'))window.location.href='/login';
+const orgId=window.location.pathname.split('/').pop();
+(async()=>{
+  const r=await fetch('/organisations/'+orgId);
+  if(!r.ok){document.getElementById('err').textContent='Not found';return}
+  const o=await r.json();
+  document.getElementById('f').name.value=o.name;
+})();
+document.getElementById('f').onsubmit=async e=>{
+  e.preventDefault();
+  const fd=Object.fromEntries(new FormData(e.target));
+  const r=await fetch('/organisations/'+orgId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('accessToken')},body:JSON.stringify({name:fd.name})});
+  if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+  window.location.href='/view/organisation/'+orgId;
+};
 </script>
 </body></html>`);
 });
@@ -760,40 +1157,6 @@ document.getElementById('logout').onclick=()=>{
   localStorage.removeItem('accessToken');
   localStorage.removeItem('refreshToken');
   window.location.href='/login';
-};
-</script>
-</body></html>`);
-});
-
-app.get('/create-event', (_req: Request, res: Response) => {
-  res.type('html').send(`<!DOCTYPE html>
-<html><head><title>Create event</title>${PAGE_HEAD}</head><body>
-<div class="c">
-<h1>Create event</h1>
-${APP_NAV}
-<hr>
-<form id="f">
-Title<br><input type="text" name="title" required><br>
-Description<br><input type="text" name="description" required><br>
-Latitude<br><input type="number" name="latitude" step="any" min="-90" max="90" required><br>
-Longitude<br><input type="number" name="longitude" step="any" min="-180" max="180" required><br>
-Start<br><input type="datetime-local" name="startDate" required><br>
-End<br><input type="datetime-local" name="endDate" required><br>
-Organisation ID (optional)<br><input type="number" name="organisationId"><br><br>
-<button type="submit">Create</button>
-</form>
-<p id="err"></p>
-</div>
-<script>
-if(!localStorage.getItem('accessToken'))window.location.href='/login';
-document.getElementById('f').onsubmit=async e=>{
-  e.preventDefault();
-  const fd=Object.fromEntries(new FormData(e.target));
-  const body={title:fd.title,description:fd.description,latitude:Number(fd.latitude),longitude:Number(fd.longitude),startDate:new Date(fd.startDate).toISOString(),endDate:new Date(fd.endDate).toISOString()};
-  if(fd.organisationId)body.organisationId=Number(fd.organisationId);
-  const r=await fetch('/events',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('accessToken')},body:JSON.stringify(body)});
-  if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
-  window.location.href='/';
 };
 </script>
 </body></html>`);
