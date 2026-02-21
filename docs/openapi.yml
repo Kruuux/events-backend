@@ -4,7 +4,7 @@ info:
   version: 1.0.0
 
 paths:
-  /join:
+  /api/v1/join:
     post:
       summary: Create an account
       requestBody:
@@ -49,7 +49,7 @@ paths:
                   value:
                     code: NICKNAME_ALREADY_TAKEN_EXCEPTION
 
-  /enter:
+  /api/v1/enter:
     post:
       summary: Log in
       requestBody:
@@ -83,7 +83,7 @@ paths:
               example:
                 code: INVALID_CREDENTIALS_EXCEPTION
 
-  /refresh:
+  /api/v1/refresh:
     post:
       summary: Refresh tokens
       requestBody:
@@ -114,7 +114,7 @@ paths:
               example:
                 code: INVALID_REFRESH_TOKEN_EXCEPTION
 
-  /logout-all:
+  /api/v1/logout-all:
     post:
       summary: End all sessions
       security:
@@ -131,7 +131,7 @@ paths:
               example:
                 code: UNAUTHORIZED_EXCEPTION
 
-  /humans:
+  /api/v1/humans:
     get:
       summary: Search humans by nickname
       parameters:
@@ -166,7 +166,7 @@ paths:
         "400":
           $ref: "#/components/responses/ValidationException"
 
-  /organisations:
+  /api/v1/organisations:
     post:
       summary: Create organisation (admin only)
       security:
@@ -241,7 +241,7 @@ paths:
         "400":
           $ref: "#/components/responses/ValidationException"
 
-  /organisations/{id}:
+  /api/v1/organisations/{id}:
     get:
       summary: Get organisation by ID
       parameters:
@@ -333,7 +333,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /countries:
+  /api/v1/countries:
     post:
       summary: Create country (admin only)
       security:
@@ -408,7 +408,7 @@ paths:
         "400":
           $ref: "#/components/responses/ValidationException"
 
-  /countries/{id}:
+  /api/v1/countries/{id}:
     get:
       summary: Get country by ID
       parameters:
@@ -508,7 +508,7 @@ paths:
               example:
                 code: COUNTRY_HAS_DEPENDENCIES_EXCEPTION
 
-  /cities:
+  /api/v1/cities:
     post:
       summary: Create city (admin only)
       security:
@@ -592,7 +592,7 @@ paths:
         "400":
           $ref: "#/components/responses/ValidationException"
 
-  /cities/{id}:
+  /api/v1/cities/{id}:
     get:
       summary: Get city by ID
       parameters:
@@ -687,7 +687,7 @@ paths:
               example:
                 code: CITY_HAS_DEPENDENCIES_EXCEPTION
 
-  /places:
+  /api/v1/places:
     post:
       summary: Create place (admin only)
       security:
@@ -782,7 +782,7 @@ paths:
         "400":
           $ref: "#/components/responses/ValidationException"
 
-  /places/{id}:
+  /api/v1/places/{id}:
     get:
       summary: Get place by ID
       parameters:
@@ -888,7 +888,7 @@ paths:
               example:
                 code: PLACE_HAS_EVENTS_EXCEPTION
 
-  /events:
+  /api/v1/events:
     post:
       summary: Create event (admin only)
       security:
@@ -973,7 +973,7 @@ paths:
         "400":
           $ref: "#/components/responses/ValidationException"
 
-  /events/area:
+  /api/v1/events/area:
     get:
       summary: Get events within a geographic area (max 10x10 km)
       parameters:
@@ -1034,7 +1034,7 @@ paths:
                   value:
                     code: AREA_TOO_LARGE_EXCEPTION
 
-  /events/{id}:
+  /api/v1/events/{id}:
     get:
       summary: Get event by ID
       parameters:
@@ -1139,7 +1139,45 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /organisations/{organisationId}/events:
+  /api/v1/places/{placeId}/events:
+    get:
+      summary: List events for a place
+      parameters:
+        - name: placeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        "200":
+          description: Paginated list of events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Event"
+                  count:
+                    type: integer
+        "400":
+          $ref: "#/components/responses/ValidationException"
+
+  /api/v1/organisations/{organisationId}/events:
     get:
       summary: List events for an organisation
       parameters:

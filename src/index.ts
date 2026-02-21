@@ -103,7 +103,7 @@ const JoinSchema = v.object({
   role: v.picklist(['admin', 'member']),
 });
 
-app.post('/join', async (req: Request, res: Response) => {
+app.post('/api/v1/join', async (req: Request, res: Response) => {
   const data = validate(JoinSchema, req.body, res);
   if (!data) return;
 
@@ -148,7 +148,7 @@ const EnterSchema = v.object({
   password: v.string(),
 });
 
-app.post('/enter', async (req: Request, res: Response) => {
+app.post('/api/v1/enter', async (req: Request, res: Response) => {
   const data = validate(EnterSchema, req.body, res);
   if (!data) return;
 
@@ -200,7 +200,7 @@ const RefreshSchema = v.object({
   refreshToken: v.string(),
 });
 
-app.post('/refresh', async (req: Request, res: Response) => {
+app.post('/api/v1/refresh', async (req: Request, res: Response) => {
   const data = validate(RefreshSchema, req.body, res);
   if (!data) return;
 
@@ -249,7 +249,7 @@ app.post('/refresh', async (req: Request, res: Response) => {
   res.status(200).json({ accessToken, refreshToken });
 });
 
-app.post('/logout-all', async (req: Request, res: Response) => {
+app.post('/api/v1/logout-all', async (req: Request, res: Response) => {
   const payload = authenticate(req);
   if (!payload) {
     res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
@@ -268,7 +268,7 @@ const HumanSearchSchema = v.object({
   limit: v.optional(v.pipe(v.string(), v.regex(/^\d+$/)), '10'),
 });
 
-app.get('/humans', async (req: Request, res: Response) => {
+app.get('/api/v1/humans', async (req: Request, res: Response) => {
   const query = validate(HumanSearchSchema, req.query, res);
   if (!query) return;
 
@@ -290,7 +290,7 @@ const CreateOrganisationSchema = v.object({
   name: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
 });
 
-app.post('/organisations', async (req: Request, res: Response) => {
+app.post('/api/v1/organisations', async (req: Request, res: Response) => {
   const payload = authenticate(req);
   if (!payload) {
     res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
@@ -330,7 +330,7 @@ const OrganisationListSchema = v.object({
   name: v.optional(v.string()),
 });
 
-app.get('/organisations', async (req: Request, res: Response) => {
+app.get('/api/v1/organisations', async (req: Request, res: Response) => {
   const query = validate(OrganisationListSchema, req.query, res);
   if (!query) return;
 
@@ -357,7 +357,7 @@ app.get('/organisations', async (req: Request, res: Response) => {
   res.status(200).json({ data: rows.rows, count: total });
 });
 
-app.get('/organisations/:id', async (req: Request, res: Response) => {
+app.get('/api/v1/organisations/:id', async (req: Request, res: Response) => {
   const params = validate(IdParamSchema, req.params, res);
   if (!params) return;
 
@@ -380,7 +380,7 @@ const UpdateOrganisationSchema = v.object({
   name: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
 });
 
-app.put('/organisations/:id', async (req: Request, res: Response) => {
+app.put('/api/v1/organisations/:id', async (req: Request, res: Response) => {
   const data = validate(
     UpdateOrganisationSchema,
     { ...req.params, ...req.body },
@@ -421,7 +421,7 @@ app.put('/organisations/:id', async (req: Request, res: Response) => {
   res.status(200).json(row.rows[0]);
 });
 
-app.delete('/organisations/:id', async (req: Request, res: Response) => {
+app.delete('/api/v1/organisations/:id', async (req: Request, res: Response) => {
   const params = validate(IdParamSchema, req.params, res);
   if (!params) return;
 
@@ -449,7 +449,7 @@ app.delete('/organisations/:id', async (req: Request, res: Response) => {
 });
 
 app.get(
-  '/organisations/:organisationId/events',
+  '/api/v1/organisations/:organisationId/events',
   async (req: Request, res: Response) => {
     const organisationId = req.params.organisationId;
     const query = validate(PaginationSchema, req.query, res);
@@ -486,7 +486,7 @@ app.get(
   },
 );
 
-app.get('/places/:placeId/events', async (req: Request, res: Response) => {
+app.get('/api/v1/places/:placeId/events', async (req: Request, res: Response) => {
   const placeId = req.params.placeId;
   const query = validate(PaginationSchema, req.query, res);
   if (!query) return;
@@ -530,7 +530,7 @@ const UpdateCountrySchema = v.object({
   name: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
 });
 
-app.post('/countries', async (req: Request, res: Response) => {
+app.post('/api/v1/countries', async (req: Request, res: Response) => {
   const payload = authenticate(req);
   if (!payload) {
     res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
@@ -570,7 +570,7 @@ const CountryListSchema = v.object({
   name: v.optional(v.string()),
 });
 
-app.get('/countries', async (req: Request, res: Response) => {
+app.get('/api/v1/countries', async (req: Request, res: Response) => {
   const query = validate(CountryListSchema, req.query, res);
   if (!query) return;
 
@@ -596,7 +596,7 @@ app.get('/countries', async (req: Request, res: Response) => {
   res.status(200).json({ data: rows.rows, count: total });
 });
 
-app.get('/countries/:id', async (req: Request, res: Response) => {
+app.get('/api/v1/countries/:id', async (req: Request, res: Response) => {
   const params = validate(IdParamSchema, req.params, res);
   if (!params) return;
 
@@ -614,7 +614,7 @@ app.get('/countries/:id', async (req: Request, res: Response) => {
   res.status(200).json(row.rows[0]);
 });
 
-app.put('/countries/:id', async (req: Request, res: Response) => {
+app.put('/api/v1/countries/:id', async (req: Request, res: Response) => {
   const data = validate(
     UpdateCountrySchema,
     { ...req.params, ...req.body },
@@ -655,7 +655,7 @@ app.put('/countries/:id', async (req: Request, res: Response) => {
   res.status(200).json(row.rows[0]);
 });
 
-app.delete('/countries/:id', async (req: Request, res: Response) => {
+app.delete('/api/v1/countries/:id', async (req: Request, res: Response) => {
   const params = validate(IdParamSchema, req.params, res);
   if (!params) return;
 
@@ -706,7 +706,7 @@ const UpdateCitySchema = v.object({
   countryId: UuidSchema,
 });
 
-app.post('/cities', async (req: Request, res: Response) => {
+app.post('/api/v1/cities', async (req: Request, res: Response) => {
   const payload = authenticate(req);
   if (!payload) {
     res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
@@ -747,7 +747,7 @@ const CityListSchema = v.object({
   countryId: v.optional(UuidSchema),
 });
 
-app.get('/cities', async (req: Request, res: Response) => {
+app.get('/api/v1/cities', async (req: Request, res: Response) => {
   const query = validate(CityListSchema, req.query, res);
   if (!query) return;
 
@@ -806,7 +806,7 @@ app.get('/cities', async (req: Request, res: Response) => {
   res.status(200).json({ data: rows.rows, count: total });
 });
 
-app.get('/cities/:id', async (req: Request, res: Response) => {
+app.get('/api/v1/cities/:id', async (req: Request, res: Response) => {
   const params = validate(IdParamSchema, req.params, res);
   if (!params) return;
 
@@ -826,7 +826,7 @@ app.get('/cities/:id', async (req: Request, res: Response) => {
   res.status(200).json(row.rows[0]);
 });
 
-app.put('/cities/:id', async (req: Request, res: Response) => {
+app.put('/api/v1/cities/:id', async (req: Request, res: Response) => {
   const data = validate(UpdateCitySchema, { ...req.params, ...req.body }, res);
   if (!data) return;
 
@@ -863,7 +863,7 @@ app.put('/cities/:id', async (req: Request, res: Response) => {
   res.status(200).json(row.rows[0]);
 });
 
-app.delete('/cities/:id', async (req: Request, res: Response) => {
+app.delete('/api/v1/cities/:id', async (req: Request, res: Response) => {
   const params = validate(IdParamSchema, req.params, res);
   if (!params) return;
 
@@ -920,7 +920,7 @@ const UpdatePlaceSchema = v.object({
   cityId: UuidSchema,
 });
 
-app.post('/places', async (req: Request, res: Response) => {
+app.post('/api/v1/places', async (req: Request, res: Response) => {
   const payload = authenticate(req);
   if (!payload) {
     res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
@@ -960,7 +960,7 @@ const PlaceListSchema = v.object({
   cityId: v.optional(UuidSchema),
 });
 
-app.get('/places', async (req: Request, res: Response) => {
+app.get('/api/v1/places', async (req: Request, res: Response) => {
   const query = validate(PlaceListSchema, req.query, res);
   if (!query) return;
 
@@ -1023,7 +1023,7 @@ app.get('/places', async (req: Request, res: Response) => {
   res.status(200).json({ data: rows.rows, count: total });
 });
 
-app.get('/places/:id', async (req: Request, res: Response) => {
+app.get('/api/v1/places/:id', async (req: Request, res: Response) => {
   const params = validate(IdParamSchema, req.params, res);
   if (!params) return;
 
@@ -1046,7 +1046,7 @@ app.get('/places/:id', async (req: Request, res: Response) => {
   res.status(200).json(row.rows[0]);
 });
 
-app.put('/places/:id', async (req: Request, res: Response) => {
+app.put('/api/v1/places/:id', async (req: Request, res: Response) => {
   const data = validate(UpdatePlaceSchema, { ...req.params, ...req.body }, res);
   if (!data) return;
 
@@ -1090,7 +1090,7 @@ app.put('/places/:id', async (req: Request, res: Response) => {
   res.status(200).json(row.rows[0]);
 });
 
-app.delete('/places/:id', async (req: Request, res: Response) => {
+app.delete('/api/v1/places/:id', async (req: Request, res: Response) => {
   const params = validate(IdParamSchema, req.params, res);
   if (!params) return;
 
@@ -1139,7 +1139,7 @@ const CreateEventSchema = v.object({
   organisationId: v.optional(UuidSchema),
 });
 
-app.post('/events', async (req: Request, res: Response) => {
+app.post('/api/v1/events', async (req: Request, res: Response) => {
   const payload = authenticate(req);
   if (!payload) {
     res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
@@ -1194,7 +1194,7 @@ app.post('/events', async (req: Request, res: Response) => {
   res.status(201).json(row.rows[0]);
 });
 
-app.get('/events', async (req: Request, res: Response) => {
+app.get('/api/v1/events', async (req: Request, res: Response) => {
   const query = validate(PaginationSchema, req.query, res);
   if (!query) return;
 
@@ -1240,7 +1240,7 @@ const EventsAreaSchema = v.object({
   maxLng: CoordPipe(-180, 180),
 });
 
-app.get('/events/area', async (req: Request, res: Response) => {
+app.get('/api/v1/events/area', async (req: Request, res: Response) => {
   const query = validate(EventsAreaSchema, req.query, res);
   if (!query) return;
 
@@ -1272,7 +1272,7 @@ app.get('/events/area', async (req: Request, res: Response) => {
   res.status(200).json({ data: rows.rows });
 });
 
-app.get('/events/:id', async (req: Request, res: Response) => {
+app.get('/api/v1/events/:id', async (req: Request, res: Response) => {
   const params = validate(IdParamSchema, req.params, res);
   if (!params) return;
 
@@ -1307,7 +1307,7 @@ const UpdateEventSchema = v.object({
   organisationId: v.optional(v.nullable(UuidSchema)),
 });
 
-app.put('/events/:id', async (req: Request, res: Response) => {
+app.put('/api/v1/events/:id', async (req: Request, res: Response) => {
   const data = validate(UpdateEventSchema, { ...req.params, ...req.body }, res);
   if (!data) return;
 
@@ -1368,7 +1368,7 @@ app.put('/events/:id', async (req: Request, res: Response) => {
   res.status(200).json(row.rows[0]);
 });
 
-app.delete('/events/:id', async (req: Request, res: Response) => {
+app.delete('/api/v1/events/:id', async (req: Request, res: Response) => {
   const params = validate(IdParamSchema, req.params, res);
   if (!params) return;
 
@@ -1415,7 +1415,7 @@ document.getElementById('orgSearch').oninput=function(){
   const drop=document.getElementById('orgDrop');
   if(v.length<2){drop.style.display='none';document.getElementById('orgId').value='';return}
   debounce=setTimeout(async()=>{
-    const r=await fetch('/organisations?name='+encodeURIComponent(v)+'&limit=10');
+    const r=await fetch('/api/v1/organisations?name='+encodeURIComponent(v)+'&limit=10');
     if(!r.ok)return;
     const j=await r.json();
     drop.innerHTML='';
@@ -1440,7 +1440,7 @@ document.getElementById('placeSearch').oninput=function(){
   const drop=document.getElementById('placeDrop');
   if(v.length<2){drop.style.display='none';document.getElementById('placeId').value='';return}
   placeDebounce=setTimeout(async()=>{
-    const r=await fetch('/places?search='+encodeURIComponent(v)+'&limit=10');
+    const r=await fetch('/api/v1/places?search='+encodeURIComponent(v)+'&limit=10');
     if(!r.ok)return;
     const j=await r.json();
     drop.innerHTML='';
@@ -1690,7 +1690,7 @@ if(me.role==='admin'){
   document.getElementById('createBtn').onclick=async()=>{
     const name=document.getElementById('orgName').value.trim();
     if(!name)return;
-    const r=await fetch('/organisations',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name})});
+    const r=await fetch('/api/v1/organisations',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name})});
     if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
     document.getElementById('orgName').value='';
     document.getElementById('err').textContent='';
@@ -1705,7 +1705,7 @@ async function load(){
   if(loading||done)return;
   loading=true;
   document.getElementById('loading').style.display='block';
-  const r=await fetch('/organisations?page='+page+'&limit='+limit);
+  const r=await fetch('/api/v1/organisations?page='+page+'&limit='+limit);
   if(!r.ok){loading=false;document.getElementById('loading').style.display='none';return}
   const j=await r.json();
   const list=document.getElementById('list');
@@ -1721,7 +1721,7 @@ async function load(){
     a.onclick=async e=>{
       e.preventDefault();
       if(!confirm('Delete this organisation?'))return;
-      const r2=await fetch('/organisations/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
+      const r2=await fetch('/api/v1/organisations/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
       if(!r2.ok){const j2=await r2.json();document.getElementById('err').textContent=j2.code||JSON.stringify(j2);return}
       document.getElementById('err').textContent='';
       a.closest('div').remove();
@@ -1810,7 +1810,7 @@ const t=localStorage.getItem('accessToken');
 let me={};
 try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
 (async()=>{
-  const r=await fetch('/organisations/'+id);
+  const r=await fetch('/api/v1/organisations/'+id);
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const o=await r.json();
   document.getElementById('title').textContent=o.name;
@@ -1824,7 +1824,7 @@ try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
     document.getElementById('deleteBtn').onclick=async function(e){
       e.preventDefault();
       if(!confirm('Delete this organisation?'))return;
-      const dr=await fetch('/organisations/'+id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
+      const dr=await fetch('/api/v1/organisations/'+id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
       if(!dr.ok){const dj=await dr.json();document.getElementById('err').textContent=dj.code||JSON.stringify(dj);return}
       window.location.href='/organisations-list';
     };
@@ -1848,7 +1848,7 @@ async function loadEvents(){
   if(evLoading||evDone)return;
   evLoading=true;
   document.getElementById('loading').style.display='block';
-  const r=await fetch('/organisations/'+id+'/events?page='+evPage+'&limit='+evLimit);
+  const r=await fetch('/api/v1/organisations/'+id+'/events?page='+evPage+'&limit='+evLimit);
   if(!r.ok){evLoading=false;document.getElementById('loading').style.display='none';return}
   const j=await r.json();
   const list=document.getElementById('list');
@@ -1899,7 +1899,7 @@ ${APP_NAV}
 if(!localStorage.getItem('accessToken'))window.location.href='/login';
 const id=window.location.pathname.split('/').pop();
 (async()=>{
-  const r=await fetch('/places/'+id);
+  const r=await fetch('/api/v1/places/'+id);
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const p=await r.json();
   document.getElementById('title').textContent=p.name;
@@ -1925,7 +1925,7 @@ async function loadEvents(){
   if(evLoading||evDone)return;
   evLoading=true;
   document.getElementById('loading').style.display='block';
-  const r=await fetch('/places/'+id+'/events?page='+evPage+'&limit='+evLimit);
+  const r=await fetch('/api/v1/places/'+id+'/events?page='+evPage+'&limit='+evLimit);
   if(!r.ok){evLoading=false;document.getElementById('loading').style.display='none';return}
   const j=await r.json();
   const list=document.getElementById('list');
@@ -1997,7 +1997,7 @@ ${ORG_SEARCH_SCRIPT}
   }
   if(ev.organisationId){
     document.getElementById('orgId').value=ev.organisationId;
-    const or=await fetch('/organisations/'+ev.organisationId);
+    const or=await fetch('/api/v1/organisations/'+ev.organisationId);
     if(or.ok){const oj=await or.json();document.getElementById('orgSearch').value=oj.name}
   }
 })();
@@ -2034,7 +2034,7 @@ if(!localStorage.getItem('accessToken'))window.location.href='/login';
 try{const p=JSON.parse(atob(localStorage.getItem('accessToken').split('.')[1]));if(p.role!=='admin')window.location.href='/'}catch{window.location.href='/login'}
 const orgId=window.location.pathname.split('/').pop();
 (async()=>{
-  const r=await fetch('/organisations/'+orgId);
+  const r=await fetch('/api/v1/organisations/'+orgId);
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const o=await r.json();
   document.getElementById('f').name.value=o.name;
@@ -2042,7 +2042,7 @@ const orgId=window.location.pathname.split('/').pop();
 document.getElementById('f').onsubmit=async e=>{
   e.preventDefault();
   const fd=Object.fromEntries(new FormData(e.target));
-  const r=await fetch('/organisations/'+orgId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('accessToken')},body:JSON.stringify({name:fd.name})});
+  const r=await fetch('/api/v1/organisations/'+orgId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('accessToken')},body:JSON.stringify({name:fd.name})});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
   window.location.href='/view/organisation/'+orgId;
 };
@@ -2336,7 +2336,7 @@ document.getElementById('createBtn').onclick=async()=>{
   const longitude=Number(document.getElementById('placeLng').value);
   const cityId=document.getElementById('citySelect').value;
   if(!name||!address||!cityId)return;
-  const r=await fetch('/places',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name,address,latitude,longitude,cityId})});
+  const r=await fetch('/api/v1/places',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name,address,latitude,longitude,cityId})});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
   document.getElementById('placeName').value='';
   document.getElementById('placeAddress').value='';
@@ -2353,7 +2353,7 @@ document.getElementById('saveBtn').onclick=async()=>{
   const longitude=Number(document.getElementById('editLng').value);
   const cityId=document.getElementById('editCitySelect').value;
   if(!name||!address||!cityId||!editId)return;
-  const r=await fetch('/places/'+editId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name,address,latitude,longitude,cityId})});
+  const r=await fetch('/api/v1/places/'+editId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name,address,latitude,longitude,cityId})});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
   document.getElementById('editForm').style.display='none';
   document.getElementById('createForm').style.display='block';
@@ -2402,7 +2402,7 @@ async function loadList(){
     a.onclick=async e=>{
       e.preventDefault();
       if(!confirm('Delete this place?'))return;
-      const r=await fetch('/places/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
+      const r=await fetch('/api/v1/places/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
       if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
       document.getElementById('err').textContent='';
       loadList();
