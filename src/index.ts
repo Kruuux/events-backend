@@ -1031,11 +1031,13 @@ let markers=[];
 
 function initMap(){
   if(map)return;
-  map=L.map('map').setView([0,0],2);
+  map=L.map('map',{attributionControl:false}).setView([51.110655,17.032817],15);
+  L.control.attribution({prefix:false}).addTo(map);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
     attribution:'&copy; OpenStreetMap'
   }).addTo(map);
   map.on('moveend',loadArea);
+  loadArea();
 }
 
 async function loadArea(){
