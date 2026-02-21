@@ -573,8 +573,13 @@ app.delete(
           'SELECT human_id FROM organisers WHERE organisation_id = $1 ORDER BY created_at ASC LIMIT 1',
           [data.organisationId],
         );
-        if (firstOrganiser.rows.length > 0 && firstOrganiser.rows[0]!.human_id === data.humanId) {
-          res.status(403).json({ code: 'CANNOT_REMOVE_FIRST_ORGANISER_EXCEPTION' });
+        if (
+          firstOrganiser.rows.length > 0 &&
+          firstOrganiser.rows[0]!.human_id === data.humanId
+        ) {
+          res
+            .status(403)
+            .json({ code: 'CANNOT_REMOVE_FIRST_ORGANISER_EXCEPTION' });
           return;
         }
       }
@@ -634,12 +639,10 @@ app.get(
   async (req: Request, res: Response) => {
     const humanId = req.query.humanId as string;
     if (!humanId) {
-      res
-        .status(400)
-        .json({
-          code: 'VALIDATION_EXCEPTION',
-          violations: [{ property: 'humanId', message: 'Required' }],
-        });
+      res.status(400).json({
+        code: 'VALIDATION_EXCEPTION',
+        violations: [{ property: 'humanId', message: 'Required' }],
+      });
       return;
     }
     const organisationId = req.params.organisationId;
@@ -1067,7 +1070,7 @@ try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
   document.getElementById('title').textContent=o.name;
   let html='<p>Name: '+esc(o.name)+'</p>'
     +'<p>Created: '+new Date(o.createdAt).toLocaleString()+'</p>';
-  if(o.isOrganiser){
+  if(o.isOrganiser||me.role==='admin'){
     html+='<br><a href="/edit/organisation/'+o.id+'">[edit]</a>';
     html+=' <a href="/manage/organisation/'+o.id+'/organisers">[manage organisers]</a>';
   }
@@ -1227,8 +1230,10 @@ document.getElementById('f').onsubmit=async e=>{
 </body></html>`);
 });
 
-app.get('/manage/organisation/:id/organisers', (_req: Request, res: Response) => {
-  res.type('html').send(`<!DOCTYPE html>
+app.get(
+  '/manage/organisation/:id/organisers',
+  (_req: Request, res: Response) => {
+    res.type('html').send(`<!DOCTYPE html>
 <html><head><title>Manage organisers</title>${PAGE_HEAD}</head><body>
 <div class="c">
 <h1 id="title">Manage organisers</h1>
@@ -1313,7 +1318,8 @@ function esc(s){const d=document.createElement('div');d.textContent=s;return d.i
 loadOrganisers();
 </script>
 </body></html>`);
-});
+  },
+);
 
 app.get('/profile', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>
