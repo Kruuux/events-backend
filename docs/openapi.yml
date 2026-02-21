@@ -714,6 +714,67 @@ paths:
         "400":
           $ref: "#/components/responses/ValidationException"
 
+  /events/area:
+    get:
+      summary: Get events within a geographic area (max 10x10 km)
+      parameters:
+        - name: minLat
+          in: query
+          required: true
+          schema:
+            type: number
+            minimum: -90
+            maximum: 90
+        - name: maxLat
+          in: query
+          required: true
+          schema:
+            type: number
+            minimum: -90
+            maximum: 90
+        - name: minLng
+          in: query
+          required: true
+          schema:
+            type: number
+            minimum: -180
+            maximum: 180
+        - name: maxLng
+          in: query
+          required: true
+          schema:
+            type: number
+            minimum: -180
+            maximum: 180
+      responses:
+        "200":
+          description: All events within the area
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Event"
+        "400":
+          description: Validation error or area exceeds 10x10 km
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              examples:
+                validation:
+                  value:
+                    code: VALIDATION_EXCEPTION
+                    violations:
+                      - property: minLat
+                        message: "Invalid number"
+                areaTooLarge:
+                  value:
+                    code: AREA_TOO_LARGE_EXCEPTION
+
   /events/{id}:
     get:
       summary: Get event by ID

@@ -759,6 +759,44 @@ app.get('/events', async (req: Request, res: Response) => {
   res.status(200).json({ data: rows.rows, total, page, limit });
 });
 
+const CoordPipe = (min: number, max: number) =>
+  v.pipe(v.string(), v.transform(Number), v.number(), v.minValue(min), v.maxValue(max));
+
+const EventsAreaSchema = v.object({
+  minLat: CoordPipe(-90, 90),
+  maxLat: CoordPipe(-90, 90),
+  minLng: CoordPipe(-180, 180),
+  maxLng: CoordPipe(-180, 180),
+});
+
+app.get('/events/area', async (req: Request, res: Response) => {
+  const query = validate(EventsAreaSchema, req.query, res);
+  if (!query) return;
+
+  const latKm = (query.maxLat - query.minLat) * 111;
+  const midLatRad = ((query.minLat + query.maxLat) / 2) * (Math.PI / 180);
+  const lngKm = (query.maxLng - query.minLng) * 111 * Math.cos(midLatRad);
+
+  if (latKm > 10 || lngKm > 10) {
+    res.status(400).json({ code: 'AREA_TOO_LARGE_EXCEPTION' });
+    return;
+  }
+
+  const rows = await pool.query(
+    `SELECT e.id, e.human_id AS "humanId", e.organisation_id AS "organisationId",
+            e.title, e.description, e.latitude, e.longitude,
+            e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
+            o.name AS "organisationName"
+     FROM events e LEFT JOIN organisations o ON o.id = e.organisation_id
+     WHERE e.latitude >= $1 AND e.latitude <= $2
+       AND e.longitude >= $3 AND e.longitude <= $4
+     ORDER BY e.start_date ASC`,
+    [query.minLat, query.maxLat, query.minLng, query.maxLng],
+  );
+
+  res.status(200).json({ data: rows.rows });
+});
+
 app.get('/events/:id', async (req: Request, res: Response) => {
   const params = validate(IdParamSchema, req.params, res);
   if (!params) return;
@@ -935,17 +973,30 @@ document.addEventListener('click',e=>{if(!e.target.closest('#orgSearch,#orgDrop'
 
 app.get('/', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>
-<html><head><title>Events</title>${PAGE_HEAD}<style>#end{display:none}</style></head><body>
+<html><head><title>Events</title>${PAGE_HEAD}<style>#end{display:none}</style>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
+</head><body>
 <div class="c">
 <h1>Events</h1>
 ${APP_NAV}
 <hr>
+<p id="toggle"><b>list</b> | <a href="#" id="toMap">map</a></p>
+<div id="listView">
 <div id="list"></div>
 <p id="loading">Loading...</p>
 <p id="end">---</p>
 </div>
+<div id="mapView" style="display:none">
+<p id="mapMsg" style="margin:8px 0"></p>
+<div id="map" style="width:100%;height:600px;border:1px solid #000"></div>
+</div>
+</div>
 <script>
 if(!localStorage.getItem('accessToken'))window.location.href='/login';
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+
+// --- list view ---
 let page=1;const limit=20;let loading=false;let done=false;
 async function load(){
   if(loading||done)return;
@@ -969,11 +1020,78 @@ async function load(){
   loading=false;
   document.getElementById('loading').style.display=done?'none':'block';
 }
-function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 window.addEventListener('scroll',()=>{
   if(window.innerHeight+window.scrollY>=document.body.offsetHeight-200)load();
 });
 load();
+
+// --- map view ---
+let map=null;
+let markers=[];
+
+function initMap(){
+  if(map)return;
+  map=L.map('map').setView([0,0],2);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+    attribution:'&copy; OpenStreetMap'
+  }).addTo(map);
+  map.on('moveend',loadArea);
+}
+
+async function loadArea(){
+  const b=map.getBounds();
+  const minLat=b.getSouth(),maxLat=b.getNorth(),minLng=b.getWest(),maxLng=b.getEast();
+  const latKm=(maxLat-minLat)*111;
+  const lngKm=(maxLng-minLng)*111*Math.cos(((minLat+maxLat)/2)*Math.PI/180);
+  const msg=document.getElementById('mapMsg');
+
+  markers.forEach(m=>map.removeLayer(m));
+  markers=[];
+
+  if(latKm>10||lngKm>10){
+    msg.textContent='Zoom in to see events (max 10\\u00d710 km area)';
+    return;
+  }
+  msg.textContent='';
+
+  const r=await fetch('/events/area?minLat='+minLat+'&maxLat='+maxLat+'&minLng='+minLng+'&maxLng='+maxLng);
+  if(!r.ok)return;
+  const j=await r.json();
+  for(const ev of j.data){
+    let popup='<div style="font-family:monospace;font-size:14px">'
+      +'<b><a href="/view/event/'+ev.id+'">'+esc(ev.title)+'</a></b><br>'
+      +esc(ev.description)+'<br>';
+    if(ev.organisationName)popup+='<small>Organisation: <a href="/view/organisation/'+ev.organisationId+'">'+esc(ev.organisationName)+'</a></small><br>';
+    popup+='<small>'+new Date(ev.startDate).toLocaleString()+' - '+new Date(ev.endDate).toLocaleString()+'</small></div>';
+    const m=L.marker([ev.latitude,ev.longitude]).addTo(map).bindPopup(popup);
+    markers.push(m);
+  }
+}
+
+// --- toggle ---
+document.getElementById('toMap').onclick=function(e){
+  e.preventDefault();
+  document.getElementById('listView').style.display='none';
+  document.getElementById('mapView').style.display='block';
+  document.getElementById('toggle').innerHTML='<a href="#" id="toList">list</a> | <b>map</b>';
+  document.getElementById('toList').onclick=switchToList;
+  initMap();
+  setTimeout(()=>map.invalidateSize(),0);
+};
+function switchToList(e){
+  e.preventDefault();
+  document.getElementById('listView').style.display='block';
+  document.getElementById('mapView').style.display='none';
+  document.getElementById('toggle').innerHTML='<b>list</b> | <a href="#" id="toMap2">map</a>';
+  document.getElementById('toMap2').onclick=function(e2){
+    e2.preventDefault();
+    document.getElementById('listView').style.display='none';
+    document.getElementById('mapView').style.display='block';
+    document.getElementById('toggle').innerHTML='<a href="#" id="toList">list</a> | <b>map</b>';
+    document.getElementById('toList').onclick=switchToList;
+    setTimeout(()=>map.invalidateSize(),0);
+  };
+}
 </script>
 </body></html>`);
 });
