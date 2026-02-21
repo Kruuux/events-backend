@@ -517,11 +517,16 @@ app.post(
       return;
     }
 
-    const humanCheck = await pool.query('SELECT id FROM humans WHERE id = $1', [
+    const humanCheck = await pool.query('SELECT id, role FROM humans WHERE id = $1', [
       data.humanId,
     ]);
     if (humanCheck.rows.length === 0) {
       res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+      return;
+    }
+
+    if (humanCheck.rows[0]!.role === 'admin') {
+      res.status(400).json({ code: 'CANNOT_ADD_ADMIN_AS_ORGANISER_EXCEPTION' });
       return;
     }
 
@@ -531,6 +536,15 @@ app.post(
     );
     if (existingCheck.rows.length > 0) {
       res.status(409).json({ code: 'ALREADY_ORGANISER_EXCEPTION' });
+      return;
+    }
+
+    const countCheck = await pool.query(
+      'SELECT COUNT(*) AS cnt FROM organisers WHERE organisation_id = $1',
+      [data.organisationId],
+    );
+    if (Number(countCheck.rows[0]!.cnt) >= 5) {
+      res.status(400).json({ code: 'MAX_ORGANISERS_REACHED_EXCEPTION' });
       return;
     }
 

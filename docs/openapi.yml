@@ -431,7 +431,24 @@ paths:
               schema:
                 $ref: "#/components/schemas/Organiser"
         "400":
-          $ref: "#/components/responses/ValidationException"
+          description: Validation error, admin cannot be added as organiser, or max organisers reached
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              examples:
+                validation:
+                  value:
+                    code: VALIDATION_EXCEPTION
+                    violations:
+                      - property: humanId
+                        message: "Invalid uuid"
+                adminAsOrganiser:
+                  value:
+                    code: CANNOT_ADD_ADMIN_AS_ORGANISER_EXCEPTION
+                maxOrganisers:
+                  value:
+                    code: MAX_ORGANISERS_REACHED_EXCEPTION
         "401":
           description: Missing or invalid token
           content:
