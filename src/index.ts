@@ -517,9 +517,10 @@ app.post(
       return;
     }
 
-    const humanCheck = await pool.query('SELECT id, role FROM humans WHERE id = $1', [
-      data.humanId,
-    ]);
+    const humanCheck = await pool.query(
+      'SELECT id, role FROM humans WHERE id = $1',
+      [data.humanId],
+    );
     if (humanCheck.rows.length === 0) {
       res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
       return;
@@ -742,13 +743,14 @@ app.get('/events', async (req: Request, res: Response) => {
   const offset = (page - 1) * limit;
 
   const [countResult, rows] = await Promise.all([
-    pool.query('SELECT COUNT(*) FROM events'),
+    pool.query('SELECT COUNT(*) FROM events WHERE start_date >= CURRENT_DATE'),
     pool.query(
       `SELECT e.id, e.human_id AS "humanId", e.organisation_id AS "organisationId",
               e.title, e.description, e.latitude, e.longitude,
               e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
               o.name AS "organisationName"
        FROM events e LEFT JOIN organisations o ON o.id = e.organisation_id
+       WHERE e.start_date >= CURRENT_DATE
        ORDER BY e.start_date ASC LIMIT $1 OFFSET $2`,
       [limit, offset],
     ),
@@ -760,7 +762,13 @@ app.get('/events', async (req: Request, res: Response) => {
 });
 
 const CoordPipe = (min: number, max: number) =>
-  v.pipe(v.string(), v.transform(Number), v.number(), v.minValue(min), v.maxValue(max));
+  v.pipe(
+    v.string(),
+    v.transform(Number),
+    v.number(),
+    v.minValue(min),
+    v.maxValue(max),
+  );
 
 const EventsAreaSchema = v.object({
   minLat: CoordPipe(-90, 90),
@@ -788,7 +796,8 @@ app.get('/events/area', async (req: Request, res: Response) => {
             e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
             o.name AS "organisationName"
      FROM events e LEFT JOIN organisations o ON o.id = e.organisation_id
-     WHERE e.latitude >= $1 AND e.latitude <= $2
+     WHERE e.start_date >= CURRENT_DATE
+       AND e.latitude >= $1 AND e.latitude <= $2
        AND e.longitude >= $3 AND e.longitude <= $4
      ORDER BY e.start_date ASC`,
     [query.minLat, query.maxLat, query.minLng, query.maxLng],
@@ -998,6 +1007,18 @@ function esc(s){const d=document.createElement('div');d.textContent=s;return d.i
 
 // --- list view ---
 let page=1;const limit=20;let loading=false;let done=false;
+let lastDateLabel='';
+function dateLabel(ds){
+  const d=new Date(ds);
+  const now=new Date();
+  const today=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+  const tmrw=new Date(today);tmrw.setDate(tmrw.getDate()+1);
+  const dayAfter=new Date(today);dayAfter.setDate(dayAfter.getDate()+2);
+  const t=new Date(d.getFullYear(),d.getMonth(),d.getDate());
+  if(t.getTime()===today.getTime())return 'Today';
+  if(t.getTime()===tmrw.getTime())return 'Tomorrow';
+  return d.getDate()+' '+d.toLocaleString('en',{month:'long'})+' '+d.getFullYear();
+}
 async function load(){
   if(loading||done)return;
   loading=true;
@@ -1007,11 +1028,19 @@ async function load(){
   const j=await r.json();
   const list=document.getElementById('list');
   for(const ev of j.data){
+    const lbl=dateLabel(ev.startDate);
+    if(lbl!==lastDateLabel){
+      lastDateLabel=lbl;
+      const h=document.createElement('h2');
+      h.style.margin='24px 0 12px';
+      h.textContent=lbl;
+      list.appendChild(h);
+    }
     const d=document.createElement('div');
     let evHtml='<a href="/view/event/'+ev.id+'"><b>'+esc(ev.title)+'</b></a><br>'
       +esc(ev.description)+'<br>';
     if(ev.organisationName)evHtml+='<small>Organisation: <a href="/view/organisation/'+ev.organisationId+'">'+esc(ev.organisationName)+'</a></small><br>';
-    evHtml+='<small>'+new Date(ev.startDate).toLocaleString()+' - '+new Date(ev.endDate).toLocaleString()+'</small><hr>';
+    evHtml+='<hr>';
     d.innerHTML=evHtml;
     list.appendChild(d);
   }
