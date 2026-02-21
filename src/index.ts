@@ -153,7 +153,7 @@ app.post('/enter', async (req: Request, res: Response) => {
   const { email, password } = data;
 
   const humanResult = await pool.query(
-    'SELECT id, password_hash, salt, role FROM humans WHERE email = $1',
+    'SELECT id, nickname, email, password_hash, salt, role FROM humans WHERE email = $1',
     [email],
   );
 
@@ -177,7 +177,7 @@ app.post('/enter', async (req: Request, res: Response) => {
   }
 
   const accessToken = jwt.sign(
-    { sub: human.id, role: human.role },
+    { sub: human.id, role: human.role, nickname: human.nickname, email: human.email },
     JWT_SECRET,
     { expiresIn: '15m' },
   );
@@ -224,14 +224,16 @@ app.post('/refresh', async (req: Request, res: Response) => {
   const humanId = session.rows[0]!.human_id as number;
 
   const humanResult = await pool.query(
-    'SELECT role FROM humans WHERE id = $1',
+    'SELECT nickname, email, role FROM humans WHERE id = $1',
     [humanId],
   );
-  const role = humanResult.rows[0]?.role as string;
+  const { nickname, email: humanEmail, role } = humanResult.rows[0]!;
 
-  const accessToken = jwt.sign({ sub: humanId, role }, JWT_SECRET, {
-    expiresIn: '15m',
-  });
+  const accessToken = jwt.sign(
+    { sub: humanId, role, nickname, email: humanEmail },
+    JWT_SECRET,
+    { expiresIn: '15m' },
+  );
   const refreshToken = await createSession(
     humanId,
     new Date(Date.now() + 60 * 60 * 1000),
@@ -687,6 +689,169 @@ app.delete('/events/:id', async (req: Request, res: Response) => {
   }
 
   res.status(200).end();
+});
+
+// --- pages ---
+
+app.get('/', (_req: Request, res: Response) => {
+  res.type('html').send(`<!DOCTYPE html>
+<html><head>
+<title>Events</title>
+<style>body{background:#fff;color:#000;max-width:600px;margin:40px auto;padding:0 16px}a{color:#000}hr{border:none;border-top:1px solid #000}#end{display:none}</style>
+</head><body>
+<h1>Events</h1>
+<p>[<a href="/create-event">Create event</a>] [<a href="/profile">Profile</a>]</p>
+<hr>
+<div id="list"></div>
+<p id="loading">Loading...</p>
+<p id="end">---</p>
+<script>
+if(!localStorage.getItem('accessToken'))window.location.href='/login';
+let page=1;const limit=20;let loading=false;let done=false;
+async function load(){
+  if(loading||done)return;
+  loading=true;
+  document.getElementById('loading').style.display='block';
+  const r=await fetch('/events?page='+page+'&limit='+limit);
+  if(!r.ok){loading=false;document.getElementById('loading').style.display='none';return}
+  const j=await r.json();
+  const list=document.getElementById('list');
+  for(const ev of j.data){
+    const d=document.createElement('div');
+    d.innerHTML='<b>'+esc(ev.title)+'</b><br>'
+      +esc(ev.description)+'<br>'
+      +'<small>'+new Date(ev.startDate).toLocaleString()+' - '+new Date(ev.endDate).toLocaleString()+'</small><hr>';
+    list.appendChild(d);
+  }
+  if(page*limit>=j.total){done=true;document.getElementById('end').style.display='block'}
+  else{page++}
+  loading=false;
+  document.getElementById('loading').style.display=done?'none':'block';
+}
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+window.addEventListener('scroll',()=>{
+  if(window.innerHeight+window.scrollY>=document.body.offsetHeight-200)load();
+});
+load();
+</script>
+</body></html>`);
+});
+
+app.get('/profile', (_req: Request, res: Response) => {
+  res.type('html').send(`<!DOCTYPE html>
+<html><head>
+<title>Profile</title>
+<style>body{background:#fff;color:#000;max-width:360px;margin:80px auto;padding:0 16px}a{color:#000}button{border:1px solid #000;background:#fff;color:#000;padding:4px 12px;cursor:pointer}</style>
+</head><body>
+<h1>Profile</h1>
+<p>[<a href="/">Events</a>]</p>
+<p>Nickname: <b id="nick"></b></p>
+<p>Email: <b id="email"></b></p>
+<br>
+<button id="logout">Log out</button>
+<script>
+const t=localStorage.getItem('accessToken');
+if(!t){window.location.href='/login'}
+else{try{const p=JSON.parse(atob(t.split('.')[1]));document.getElementById('nick').textContent=p.nickname;document.getElementById('email').textContent=p.email}catch{window.location.href='/login'}}
+document.getElementById('logout').onclick=()=>{
+  localStorage.removeItem('accessToken');
+  localStorage.removeItem('refreshToken');
+  window.location.href='/login';
+};
+</script>
+</body></html>`);
+});
+
+app.get('/create-event', (_req: Request, res: Response) => {
+  res.type('html').send(`<!DOCTYPE html>
+<html><head>
+<title>Create event</title>
+<style>body{background:#fff;color:#000;max-width:360px;margin:80px auto;padding:0 16px}a{color:#000}input{border:1px solid #000;padding:4px;margin:2px 0 8px;width:100%;box-sizing:border-box}button{border:1px solid #000;background:#fff;color:#000;padding:4px 12px;cursor:pointer}#err{font-weight:bold}</style>
+</head><body>
+<h1>Create event</h1>
+<p>[<a href="/">Events</a>] [<a href="/profile">Profile</a>]</p>
+<form id="f">
+Title<br><input type="text" name="title" required><br>
+Description<br><input type="text" name="description" required><br>
+Latitude<br><input type="number" name="latitude" step="any" min="-90" max="90" required><br>
+Longitude<br><input type="number" name="longitude" step="any" min="-180" max="180" required><br>
+Start<br><input type="datetime-local" name="startDate" required><br>
+End<br><input type="datetime-local" name="endDate" required><br>
+Organisation ID (optional)<br><input type="number" name="organisationId"><br><br>
+<button type="submit">Create</button>
+</form>
+<p id="err"></p>
+<script>
+if(!localStorage.getItem('accessToken'))window.location.href='/login';
+document.getElementById('f').onsubmit=async e=>{
+  e.preventDefault();
+  const fd=Object.fromEntries(new FormData(e.target));
+  const body={title:fd.title,description:fd.description,latitude:Number(fd.latitude),longitude:Number(fd.longitude),startDate:new Date(fd.startDate).toISOString(),endDate:new Date(fd.endDate).toISOString()};
+  if(fd.organisationId)body.organisationId=Number(fd.organisationId);
+  const r=await fetch('/events',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('accessToken')},body:JSON.stringify(body)});
+  if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+  window.location.href='/';
+};
+</script>
+</body></html>`);
+});
+
+app.get('/login', (_req: Request, res: Response) => {
+  res.type('html').send(`<!DOCTYPE html>
+<html><head>
+<title>Login</title>
+<style>body{background:#fff;color:#000;max-width:360px;margin:80px auto;padding:0 16px}a{color:#000}input{border:1px solid #000;padding:4px;margin:2px 0 8px;width:100%;box-sizing:border-box}button{border:1px solid #000;background:#fff;color:#000;padding:4px 12px;cursor:pointer}#err{font-weight:bold}</style>
+</head><body>
+<h1>Login</h1>
+<form id="f">
+Email<br><input type="email" name="email" required><br>
+Password<br><input type="password" name="password" required><br>
+<button type="submit">Log in</button>
+</form>
+<p><a href="/signup">Sign up</a></p>
+<p id="err"></p>
+<script>
+document.getElementById('f').onsubmit=async e=>{
+  e.preventDefault();
+  const d=Object.fromEntries(new FormData(e.target));
+  const r=await fetch('/enter',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});
+  if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+  const j=await r.json();
+  localStorage.setItem('accessToken',j.accessToken);
+  localStorage.setItem('refreshToken',j.refreshToken);
+  window.location.href='/';
+};
+</script>
+</body></html>`);
+});
+
+app.get('/signup', (_req: Request, res: Response) => {
+  res.type('html').send(`<!DOCTYPE html>
+<html><head>
+<title>Sign up</title>
+<style>body{background:#fff;color:#000;max-width:360px;margin:80px auto;padding:0 16px}a{color:#000}input,select{border:1px solid #000;padding:4px;margin:2px 0 8px;width:100%;box-sizing:border-box}button{border:1px solid #000;background:#fff;color:#000;padding:4px 12px;cursor:pointer}#err{font-weight:bold}</style>
+</head><body>
+<h1>Sign up</h1>
+<form id="f">
+Nickname<br><input type="text" name="nickname" minlength="2" maxlength="32" required><br>
+Email<br><input type="email" name="email" required><br>
+Password<br><input type="password" name="password" minlength="8" maxlength="128" required><br>
+Role<br><select name="role"><option value="member">Member</option><option value="admin">Admin</option></select><br><br>
+<button type="submit">Sign up</button>
+</form>
+<p><a href="/login">Log in</a></p>
+<p id="err"></p>
+<script>
+document.getElementById('f').onsubmit=async e=>{
+  e.preventDefault();
+  const d=Object.fromEntries(new FormData(e.target));
+  const r=await fetch('/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});
+  if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+  document.getElementById('err').textContent='';
+  window.location.href='/login';
+};
+</script>
+</body></html>`);
 });
 
 // --- docs ---
