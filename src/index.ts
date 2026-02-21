@@ -973,7 +973,7 @@ document.addEventListener('click',e=>{if(!e.target.closest('#orgSearch,#orgDrop'
 
 app.get('/', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>
-<html><head><title>Events</title>${PAGE_HEAD}<style>#end{display:none}</style>
+<html><head><title>Events</title>${PAGE_HEAD}<style>#end{display:none}.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:#fff;color:#000;border-radius:0;box-shadow:none;border:1px solid #000}.leaflet-popup-content{font-family:monospace;font-size:14px}.leaflet-container a{color:#000}.leaflet-control-zoom a{background:#fff;color:#000;border:1px solid #000;border-radius:0}.leaflet-control-attribution{font-family:monospace;font-size:11px}</style>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
 </head><body>
