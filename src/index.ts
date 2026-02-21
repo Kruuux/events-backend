@@ -669,6 +669,42 @@ app.get(
   },
 );
 
+app.get(
+  '/organisations/:organisationId/events',
+  async (req: Request, res: Response) => {
+    const organisationId = req.params.organisationId;
+    const query = validate(PaginationSchema, req.query, res);
+    if (!query) return;
+
+    const page = Math.max(1, Number(query.page));
+    const limit = Math.min(100, Math.max(1, Number(query.limit)));
+    const offset = (page - 1) * limit;
+
+    const [countResult, rows] = await Promise.all([
+      pool.query(
+        'SELECT COUNT(*) FROM events WHERE organisation_id = $1',
+        [organisationId],
+      ),
+      pool.query(
+        `SELECT e.id, e.human_id AS "humanId", e.organisation_id AS "organisationId",
+                e.title, e.description, e.latitude, e.longitude,
+                e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
+                o.name AS "organisationName"
+         FROM events e LEFT JOIN organisations o ON o.id = e.organisation_id
+         WHERE e.organisation_id = $1
+         ORDER BY CASE WHEN e.start_date >= CURRENT_DATE THEN 0 ELSE 1 END,
+                  CASE WHEN e.start_date >= CURRENT_DATE THEN e.start_date END ASC,
+                  CASE WHEN e.start_date < CURRENT_DATE THEN e.start_date END DESC
+         LIMIT $2 OFFSET $3`,
+        [organisationId, limit, offset],
+      ),
+    ]);
+
+    const total = Number(countResult.rows[0]!.count);
+    res.status(200).json({ data: rows.rows, total, page, limit });
+  },
+);
+
 // --- events ---
 
 const CreateEventSchema = v.object({
@@ -1212,13 +1248,19 @@ function esc(s){const d=document.createElement('div');d.textContent=s;return d.i
 
 app.get('/view/organisation/:id', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>
-<html><head><title>Organisation</title>${PAGE_HEAD}</head><body>
+<html><head><title>Organisation</title>${PAGE_HEAD}<style>#end{display:none}</style></head><body>
 <div class="c">
 <h1 id="title">Organisation</h1>
 ${APP_NAV}
 <hr>
 <div id="detail"></div>
 <p id="err"></p>
+<div id="eventsSection" style="display:none">
+<h2 style="margin:24px 0 12px">Events</h2>
+<div id="list"></div>
+<p id="loading">Loading...</p>
+<p id="end">---</p>
+</div>
 </div>
 <script>
 if(!localStorage.getItem('accessToken'))window.location.href='/login';
@@ -1238,8 +1280,52 @@ try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
     html+=' <a href="/manage/organisation/'+o.id+'/organisers">[manage organisers]</a>';
   }
   document.getElementById('detail').innerHTML=html;
+  document.getElementById('eventsSection').style.display='block';
+  loadEvents();
 })();
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function dateLabel(ds){
+  const d=new Date(ds);
+  const now=new Date();
+  const today=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+  const tmrw=new Date(today);tmrw.setDate(tmrw.getDate()+1);
+  const t2=new Date(d.getFullYear(),d.getMonth(),d.getDate());
+  if(t2.getTime()===today.getTime())return 'Today';
+  if(t2.getTime()===tmrw.getTime())return 'Tomorrow';
+  return d.getDate()+' '+d.toLocaleString('en',{month:'long'})+' '+d.getFullYear();
+}
+let evPage=1;const evLimit=20;let evLoading=false;let evDone=false;let lastDateLabel='';
+async function loadEvents(){
+  if(evLoading||evDone)return;
+  evLoading=true;
+  document.getElementById('loading').style.display='block';
+  const r=await fetch('/organisations/'+id+'/events?page='+evPage+'&limit='+evLimit);
+  if(!r.ok){evLoading=false;document.getElementById('loading').style.display='none';return}
+  const j=await r.json();
+  const list=document.getElementById('list');
+  for(const ev of j.data){
+    const lbl=dateLabel(ev.startDate);
+    if(lbl!==lastDateLabel){
+      lastDateLabel=lbl;
+      const h=document.createElement('h3');
+      h.style.margin='24px 0 12px';
+      h.textContent=lbl;
+      list.appendChild(h);
+    }
+    const d=document.createElement('div');
+    let evHtml='<a href="/view/event/'+ev.id+'"><b>'+esc(ev.title)+'</b></a><br>'
+      +esc(ev.description)+'<br><hr>';
+    d.innerHTML=evHtml;
+    list.appendChild(d);
+  }
+  if(evPage*evLimit>=j.total){evDone=true;document.getElementById('end').style.display='block'}
+  else{evPage++}
+  evLoading=false;
+  document.getElementById('loading').style.display=evDone?'none':'block';
+}
+window.addEventListener('scroll',()=>{
+  if(window.innerHeight+window.scrollY>=document.body.offsetHeight-200)loadEvents();
+});
 </script>
 </body></html>`);
 });
