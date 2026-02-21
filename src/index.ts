@@ -372,22 +372,7 @@ app.get('/organisations/:id', async (req: Request, res: Response) => {
     return;
   }
 
-  const org = row.rows[0]!;
-  const payload = authenticate(req);
-  let isOrganiser = false;
-  if (payload) {
-    if (payload.role === 'admin') {
-      isOrganiser = true;
-    } else {
-      const check = await pool.query(
-        'SELECT id FROM organisers WHERE human_id = $1 AND organisation_id = $2',
-        [payload.sub, params.id],
-      );
-      isOrganiser = check.rows.length > 0;
-    }
-  }
-
-  res.status(200).json({ ...org, isOrganiser });
+  res.status(200).json(row.rows[0]);
 });
 
 const UpdateOrganisationSchema = v.object({
@@ -409,14 +394,8 @@ app.put('/organisations/:id', async (req: Request, res: Response) => {
     return;
   }
   if (payload.role !== 'admin') {
-    const organiserCheck = await pool.query(
-      'SELECT id FROM organisers WHERE human_id = $1 AND organisation_id = $2',
-      [payload.sub, data.id],
-    );
-    if (organiserCheck.rows.length === 0) {
-      res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
-      return;
-    }
+    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    return;
   }
 
   const nameCheck = await pool.query(
@@ -469,206 +448,6 @@ app.delete('/organisations/:id', async (req: Request, res: Response) => {
   res.status(200).end();
 });
 
-// --- organisers ---
-
-const AssignOrganiserSchema = v.object({
-  organisationId: UuidSchema,
-  humanId: UuidSchema,
-});
-
-const UnassignOrganiserSchema = v.object({
-  organisationId: UuidSchema,
-  humanId: UuidSchema,
-});
-
-app.post(
-  '/organisations/:organisationId/organisers',
-  async (req: Request, res: Response) => {
-    const data = validate(
-      AssignOrganiserSchema,
-      { ...req.params, ...req.body },
-      res,
-    );
-    if (!data) return;
-
-    const payload = authenticate(req);
-    if (!payload) {
-      res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
-      return;
-    }
-
-    if (payload.role !== 'admin') {
-      const selfCheck = await pool.query(
-        'SELECT id FROM organisers WHERE human_id = $1 AND organisation_id = $2',
-        [payload.sub, data.organisationId],
-      );
-      if (selfCheck.rows.length === 0) {
-        res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
-        return;
-      }
-    }
-
-    const orgCheck = await pool.query(
-      'SELECT id FROM organisations WHERE id = $1',
-      [data.organisationId],
-    );
-    if (orgCheck.rows.length === 0) {
-      res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
-      return;
-    }
-
-    const humanCheck = await pool.query(
-      'SELECT id, role FROM humans WHERE id = $1',
-      [data.humanId],
-    );
-    if (humanCheck.rows.length === 0) {
-      res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
-      return;
-    }
-
-    if (humanCheck.rows[0]!.role === 'admin') {
-      res.status(400).json({ code: 'CANNOT_ADD_ADMIN_AS_ORGANISER_EXCEPTION' });
-      return;
-    }
-
-    const existingCheck = await pool.query(
-      'SELECT id FROM organisers WHERE human_id = $1 AND organisation_id = $2',
-      [data.humanId, data.organisationId],
-    );
-    if (existingCheck.rows.length > 0) {
-      res.status(409).json({ code: 'ALREADY_ORGANISER_EXCEPTION' });
-      return;
-    }
-
-    const countCheck = await pool.query(
-      'SELECT COUNT(*) AS cnt FROM organisers WHERE organisation_id = $1',
-      [data.organisationId],
-    );
-    if (Number(countCheck.rows[0]!.cnt) >= 5) {
-      res.status(400).json({ code: 'MAX_ORGANISERS_REACHED_EXCEPTION' });
-      return;
-    }
-
-    const row = await pool.query(
-      `INSERT INTO organisers (id, human_id, organisation_id)
-       VALUES ($1, $2, $3)
-       RETURNING id, human_id AS "humanId", organisation_id AS "organisationId", created_at AS "createdAt"`,
-      [crypto.randomUUID(), data.humanId, data.organisationId],
-    );
-
-    res.status(201).json(row.rows[0]);
-  },
-);
-
-app.delete(
-  '/organisations/:organisationId/organisers/:humanId',
-  async (req: Request, res: Response) => {
-    const data = validate(UnassignOrganiserSchema, req.params, res);
-    if (!data) return;
-
-    const payload = authenticate(req);
-    if (!payload) {
-      res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
-      return;
-    }
-
-    if (payload.role !== 'admin') {
-      const selfCheck = await pool.query(
-        'SELECT id FROM organisers WHERE human_id = $1 AND organisation_id = $2',
-        [payload.sub, data.organisationId],
-      );
-      if (selfCheck.rows.length === 0) {
-        res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
-        return;
-      }
-
-      // members can only remove themselves or other non-first organisers
-      if (data.humanId !== payload.sub) {
-        const firstOrganiser = await pool.query(
-          'SELECT human_id FROM organisers WHERE organisation_id = $1 ORDER BY created_at ASC LIMIT 1',
-          [data.organisationId],
-        );
-        if (
-          firstOrganiser.rows.length > 0 &&
-          firstOrganiser.rows[0]!.human_id === data.humanId
-        ) {
-          res
-            .status(403)
-            .json({ code: 'CANNOT_REMOVE_FIRST_ORGANISER_EXCEPTION' });
-          return;
-        }
-      }
-    }
-
-    const row = await pool.query(
-      'DELETE FROM organisers WHERE human_id = $1 AND organisation_id = $2 RETURNING id',
-      [data.humanId, data.organisationId],
-    );
-
-    if (row.rows.length === 0) {
-      res.status(409).json({ code: 'NOT_AN_ORGANISER_EXCEPTION' });
-      return;
-    }
-
-    res.status(200).end();
-  },
-);
-
-app.get(
-  '/organisations/:organisationId/organisers',
-  async (req: Request, res: Response) => {
-    const payload = authenticate(req);
-    if (!payload) {
-      res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
-      return;
-    }
-
-    const organisationId = req.params.organisationId;
-
-    if (payload.role !== 'admin') {
-      const selfCheck = await pool.query(
-        'SELECT id FROM organisers WHERE human_id = $1 AND organisation_id = $2',
-        [payload.sub, organisationId],
-      );
-      if (selfCheck.rows.length === 0) {
-        res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
-        return;
-      }
-    }
-
-    const rows = await pool.query(
-      `SELECT o.id, o.human_id AS "humanId", o.organisation_id AS "organisationId",
-              o.created_at AS "createdAt", h.nickname
-       FROM organisers o JOIN humans h ON h.id = o.human_id
-       WHERE o.organisation_id = $1
-       ORDER BY o.created_at ASC`,
-      [organisationId],
-    );
-
-    res.status(200).json(rows.rows);
-  },
-);
-
-app.get(
-  '/organisations/:organisationId/organisers/check',
-  async (req: Request, res: Response) => {
-    const humanId = req.query.humanId as string;
-    if (!humanId) {
-      res.status(400).json({
-        code: 'VALIDATION_EXCEPTION',
-        violations: [{ property: 'humanId', message: 'Required' }],
-      });
-      return;
-    }
-    const organisationId = req.params.organisationId;
-    const row = await pool.query(
-      'SELECT id FROM organisers WHERE human_id = $1 AND organisation_id = $2',
-      [humanId, organisationId],
-    );
-    res.status(200).json({ isOrganiser: row.rows.length > 0 });
-  },
-);
-
 app.get(
   '/organisations/:organisationId/events',
   async (req: Request, res: Response) => {
@@ -686,10 +465,13 @@ app.get(
       ]),
       pool.query(
         `SELECT e.id, e.human_id AS "humanId", e.organisation_id AS "organisationId",
-                e.title, e.description, e.latitude, e.longitude,
+                e.title, e.description,
+                p.latitude, p.longitude, p.name AS "placeName", p.address AS "placeAddress",
                 e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
                 o.name AS "organisationName"
-         FROM events e LEFT JOIN organisations o ON o.id = e.organisation_id
+         FROM events e
+         JOIN places p ON p.id = e.place_id
+         LEFT JOIN organisations o ON o.id = e.organisation_id
          WHERE e.organisation_id = $1
          ORDER BY CASE WHEN e.start_date >= CURRENT_DATE THEN 0 ELSE 1 END,
                   CASE WHEN e.start_date >= CURRENT_DATE THEN e.start_date END ASC,
@@ -704,13 +486,621 @@ app.get(
   },
 );
 
+// --- countries ---
+
+const CreateCountrySchema = v.object({
+  name: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
+});
+
+const UpdateCountrySchema = v.object({
+  id: UuidSchema,
+  name: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
+});
+
+app.post('/countries', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+  if (payload.role !== 'admin') {
+    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    return;
+  }
+
+  const data = validate(CreateCountrySchema, req.body, res);
+  if (!data) return;
+
+  const nameCheck = await pool.query(
+    'SELECT id FROM countries WHERE name = $1',
+    [data.name],
+  );
+  if (nameCheck.rows.length > 0) {
+    res.status(409).json({ code: 'COUNTRY_NAME_ALREADY_TAKEN_EXCEPTION' });
+    return;
+  }
+
+  const id = crypto.randomUUID();
+  const row = await pool.query(
+    `INSERT INTO countries (id, name)
+     VALUES ($1, $2)
+     RETURNING id, name, created_at AS "createdAt", updated_at AS "updatedAt"`,
+    [id, data.name],
+  );
+
+  res.status(201).json(row.rows[0]);
+});
+
+const CountryListSchema = v.object({
+  page: v.optional(v.pipe(v.string(), v.regex(/^\d+$/)), '1'),
+  limit: v.optional(v.pipe(v.string(), v.regex(/^\d+$/)), '20'),
+  name: v.optional(v.string()),
+});
+
+app.get('/countries', async (req: Request, res: Response) => {
+  const query = validate(CountryListSchema, req.query, res);
+  if (!query) return;
+
+  const page = Math.max(1, Number(query.page));
+  const limit = Math.min(100, Math.max(1, Number(query.limit)));
+  const offset = (page - 1) * limit;
+
+  const where = query.name ? `WHERE name ILIKE '%' || $3 || '%'` : '';
+  const params = query.name ? [limit, offset, query.name] : [limit, offset];
+  const countParams = query.name ? [query.name] : [];
+  const countWhere = query.name ? `WHERE name ILIKE '%' || $1 || '%'` : '';
+
+  const [countResult, rows] = await Promise.all([
+    pool.query(`SELECT COUNT(*) FROM countries ${countWhere}`, countParams),
+    pool.query(
+      `SELECT id, name, created_at AS "createdAt", updated_at AS "updatedAt"
+       FROM countries ${where} ORDER BY name ASC LIMIT $1 OFFSET $2`,
+      params,
+    ),
+  ]);
+
+  const total = Number(countResult.rows[0]!.count);
+  res.status(200).json({ data: rows.rows, total, page, limit });
+});
+
+app.get('/countries/:id', async (req: Request, res: Response) => {
+  const params = validate(IdParamSchema, req.params, res);
+  if (!params) return;
+
+  const row = await pool.query(
+    `SELECT id, name, created_at AS "createdAt", updated_at AS "updatedAt"
+     FROM countries WHERE id = $1`,
+    [params.id],
+  );
+
+  if (row.rows.length === 0) {
+    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+    return;
+  }
+
+  res.status(200).json(row.rows[0]);
+});
+
+app.put('/countries/:id', async (req: Request, res: Response) => {
+  const data = validate(
+    UpdateCountrySchema,
+    { ...req.params, ...req.body },
+    res,
+  );
+  if (!data) return;
+
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+  if (payload.role !== 'admin') {
+    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    return;
+  }
+
+  const nameCheck = await pool.query(
+    'SELECT id FROM countries WHERE name = $1 AND id != $2',
+    [data.name, data.id],
+  );
+  if (nameCheck.rows.length > 0) {
+    res.status(409).json({ code: 'COUNTRY_NAME_ALREADY_TAKEN_EXCEPTION' });
+    return;
+  }
+
+  const row = await pool.query(
+    `UPDATE countries SET name = $1, updated_at = NOW() WHERE id = $2
+     RETURNING id, name, created_at AS "createdAt", updated_at AS "updatedAt"`,
+    [data.name, data.id],
+  );
+
+  if (row.rows.length === 0) {
+    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+    return;
+  }
+
+  res.status(200).json(row.rows[0]);
+});
+
+app.delete('/countries/:id', async (req: Request, res: Response) => {
+  const params = validate(IdParamSchema, req.params, res);
+  if (!params) return;
+
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+  if (payload.role !== 'admin') {
+    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    return;
+  }
+
+  try {
+    const row = await pool.query(
+      'DELETE FROM countries WHERE id = $1 RETURNING id',
+      [params.id],
+    );
+
+    if (row.rows.length === 0) {
+      res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+      return;
+    }
+
+    res.status(200).end();
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      err.message.includes('violates foreign key constraint')
+    ) {
+      res.status(409).json({ code: 'COUNTRY_HAS_DEPENDENCIES_EXCEPTION' });
+      return;
+    }
+    throw err;
+  }
+});
+
+// --- cities ---
+
+const CreateCitySchema = v.object({
+  name: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
+  countryId: UuidSchema,
+});
+
+const UpdateCitySchema = v.object({
+  id: UuidSchema,
+  name: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
+  countryId: UuidSchema,
+});
+
+app.post('/cities', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+  if (payload.role !== 'admin') {
+    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    return;
+  }
+
+  const data = validate(CreateCitySchema, req.body, res);
+  if (!data) return;
+
+  const countryCheck = await pool.query(
+    'SELECT id FROM countries WHERE id = $1',
+    [data.countryId],
+  );
+  if (countryCheck.rows.length === 0) {
+    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+    return;
+  }
+
+  const id = crypto.randomUUID();
+  const row = await pool.query(
+    `INSERT INTO cities (id, country_id, name)
+     VALUES ($1, $2, $3)
+     RETURNING id, country_id AS "countryId", name, created_at AS "createdAt", updated_at AS "updatedAt"`,
+    [id, data.countryId, data.name],
+  );
+
+  res.status(201).json(row.rows[0]);
+});
+
+const CityListSchema = v.object({
+  page: v.optional(v.pipe(v.string(), v.regex(/^\d+$/)), '1'),
+  limit: v.optional(v.pipe(v.string(), v.regex(/^\d+$/)), '20'),
+  name: v.optional(v.string()),
+  countryId: v.optional(UuidSchema),
+});
+
+app.get('/cities', async (req: Request, res: Response) => {
+  const query = validate(CityListSchema, req.query, res);
+  if (!query) return;
+
+  const page = Math.max(1, Number(query.page));
+  const limit = Math.min(100, Math.max(1, Number(query.limit)));
+  const offset = (page - 1) * limit;
+
+  const conditions: string[] = [];
+  const params: unknown[] = [limit, offset];
+  const countParams: unknown[] = [];
+  let paramIdx = 3;
+  let countIdx = 1;
+
+  if (query.name) {
+    conditions.push(`c.name ILIKE '%' || $${paramIdx} || '%'`);
+    params.push(query.name);
+    countParams.push(query.name);
+    paramIdx++;
+    countIdx++;
+  }
+  if (query.countryId) {
+    conditions.push(`c.country_id = $${paramIdx}`);
+    params.push(query.countryId);
+    countParams.push(query.countryId);
+    paramIdx++;
+    countIdx++;
+  }
+
+  const where =
+    conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const countConditions: string[] = [];
+  let ci = 1;
+  if (query.name) {
+    countConditions.push(`c.name ILIKE '%' || $${ci} || '%'`);
+    ci++;
+  }
+  if (query.countryId) {
+    countConditions.push(`c.country_id = $${ci}`);
+    ci++;
+  }
+  const countWhere =
+    countConditions.length > 0 ? `WHERE ${countConditions.join(' AND ')}` : '';
+
+  const [countResult, rows] = await Promise.all([
+    pool.query(`SELECT COUNT(*) FROM cities c ${countWhere}`, countParams),
+    pool.query(
+      `SELECT c.id, c.country_id AS "countryId", c.name, co.name AS "countryName",
+              c.created_at AS "createdAt", c.updated_at AS "updatedAt"
+       FROM cities c JOIN countries co ON co.id = c.country_id
+       ${where} ORDER BY c.name ASC LIMIT $1 OFFSET $2`,
+      params,
+    ),
+  ]);
+
+  const total = Number(countResult.rows[0]!.count);
+  res.status(200).json({ data: rows.rows, total, page, limit });
+});
+
+app.get('/cities/:id', async (req: Request, res: Response) => {
+  const params = validate(IdParamSchema, req.params, res);
+  if (!params) return;
+
+  const row = await pool.query(
+    `SELECT c.id, c.country_id AS "countryId", c.name, co.name AS "countryName",
+            c.created_at AS "createdAt", c.updated_at AS "updatedAt"
+     FROM cities c JOIN countries co ON co.id = c.country_id
+     WHERE c.id = $1`,
+    [params.id],
+  );
+
+  if (row.rows.length === 0) {
+    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+    return;
+  }
+
+  res.status(200).json(row.rows[0]);
+});
+
+app.put('/cities/:id', async (req: Request, res: Response) => {
+  const data = validate(UpdateCitySchema, { ...req.params, ...req.body }, res);
+  if (!data) return;
+
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+  if (payload.role !== 'admin') {
+    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    return;
+  }
+
+  const countryCheck = await pool.query(
+    'SELECT id FROM countries WHERE id = $1',
+    [data.countryId],
+  );
+  if (countryCheck.rows.length === 0) {
+    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+    return;
+  }
+
+  const row = await pool.query(
+    `UPDATE cities SET name = $1, country_id = $2, updated_at = NOW() WHERE id = $3
+     RETURNING id, country_id AS "countryId", name, created_at AS "createdAt", updated_at AS "updatedAt"`,
+    [data.name, data.countryId, data.id],
+  );
+
+  if (row.rows.length === 0) {
+    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+    return;
+  }
+
+  res.status(200).json(row.rows[0]);
+});
+
+app.delete('/cities/:id', async (req: Request, res: Response) => {
+  const params = validate(IdParamSchema, req.params, res);
+  if (!params) return;
+
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+  if (payload.role !== 'admin') {
+    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    return;
+  }
+
+  try {
+    const row = await pool.query(
+      'DELETE FROM cities WHERE id = $1 RETURNING id',
+      [params.id],
+    );
+
+    if (row.rows.length === 0) {
+      res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+      return;
+    }
+
+    res.status(200).end();
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      err.message.includes('violates foreign key constraint')
+    ) {
+      res.status(409).json({ code: 'CITY_HAS_DEPENDENCIES_EXCEPTION' });
+      return;
+    }
+    throw err;
+  }
+});
+
+// --- places ---
+
+const CreatePlaceSchema = v.object({
+  name: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
+  address: v.pipe(v.string(), v.minLength(1)),
+  latitude: v.pipe(v.number(), v.minValue(-90), v.maxValue(90)),
+  longitude: v.pipe(v.number(), v.minValue(-180), v.maxValue(180)),
+  cityId: UuidSchema,
+});
+
+const UpdatePlaceSchema = v.object({
+  id: UuidSchema,
+  name: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
+  address: v.pipe(v.string(), v.minLength(1)),
+  latitude: v.pipe(v.number(), v.minValue(-90), v.maxValue(90)),
+  longitude: v.pipe(v.number(), v.minValue(-180), v.maxValue(180)),
+  cityId: UuidSchema,
+});
+
+app.post('/places', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+  if (payload.role !== 'admin') {
+    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    return;
+  }
+
+  const data = validate(CreatePlaceSchema, req.body, res);
+  if (!data) return;
+
+  const cityCheck = await pool.query('SELECT id FROM cities WHERE id = $1', [
+    data.cityId,
+  ]);
+  if (cityCheck.rows.length === 0) {
+    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+    return;
+  }
+
+  const id = crypto.randomUUID();
+  const row = await pool.query(
+    `INSERT INTO places (id, city_id, name, address, latitude, longitude)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING id, city_id AS "cityId", name, address, latitude, longitude, created_at AS "createdAt", updated_at AS "updatedAt"`,
+    [id, data.cityId, data.name, data.address, data.latitude, data.longitude],
+  );
+
+  res.status(201).json(row.rows[0]);
+});
+
+const PlaceListSchema = v.object({
+  page: v.optional(v.pipe(v.string(), v.regex(/^\d+$/)), '1'),
+  limit: v.optional(v.pipe(v.string(), v.regex(/^\d+$/)), '20'),
+  search: v.optional(v.string()),
+  cityId: v.optional(UuidSchema),
+});
+
+app.get('/places', async (req: Request, res: Response) => {
+  const query = validate(PlaceListSchema, req.query, res);
+  if (!query) return;
+
+  const page = Math.max(1, Number(query.page));
+  const limit = Math.min(100, Math.max(1, Number(query.limit)));
+  const offset = (page - 1) * limit;
+
+  const conditions: string[] = [];
+  const params: unknown[] = [limit, offset];
+  const countParams: unknown[] = [];
+  let paramIdx = 3;
+
+  if (query.search) {
+    conditions.push(
+      `(p.name ILIKE '%' || $${paramIdx} || '%' OR p.address ILIKE '%' || $${paramIdx} || '%')`,
+    );
+    params.push(query.search);
+    countParams.push(query.search);
+    paramIdx++;
+  }
+  if (query.cityId) {
+    conditions.push(`p.city_id = $${paramIdx}`);
+    params.push(query.cityId);
+    countParams.push(query.cityId);
+    paramIdx++;
+  }
+
+  const where =
+    conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const countConditions: string[] = [];
+  let ci = 1;
+  if (query.search) {
+    countConditions.push(
+      `(p.name ILIKE '%' || $${ci} || '%' OR p.address ILIKE '%' || $${ci} || '%')`,
+    );
+    ci++;
+  }
+  if (query.cityId) {
+    countConditions.push(`p.city_id = $${ci}`);
+    ci++;
+  }
+  const countWhere =
+    countConditions.length > 0 ? `WHERE ${countConditions.join(' AND ')}` : '';
+
+  const [countResult, rows] = await Promise.all([
+    pool.query(`SELECT COUNT(*) FROM places p ${countWhere}`, countParams),
+    pool.query(
+      `SELECT p.id, p.city_id AS "cityId", p.name, p.address, p.latitude, p.longitude,
+              ci.name AS "cityName", co.name AS "countryName",
+              p.created_at AS "createdAt", p.updated_at AS "updatedAt"
+       FROM places p
+       JOIN cities ci ON ci.id = p.city_id
+       JOIN countries co ON co.id = ci.country_id
+       ${where} ORDER BY p.name ASC LIMIT $1 OFFSET $2`,
+      params,
+    ),
+  ]);
+
+  const total = Number(countResult.rows[0]!.count);
+  res.status(200).json({ data: rows.rows, total, page, limit });
+});
+
+app.get('/places/:id', async (req: Request, res: Response) => {
+  const params = validate(IdParamSchema, req.params, res);
+  if (!params) return;
+
+  const row = await pool.query(
+    `SELECT p.id, p.city_id AS "cityId", p.name, p.address, p.latitude, p.longitude,
+            ci.name AS "cityName", co.name AS "countryName",
+            p.created_at AS "createdAt", p.updated_at AS "updatedAt"
+     FROM places p
+     JOIN cities ci ON ci.id = p.city_id
+     JOIN countries co ON co.id = ci.country_id
+     WHERE p.id = $1`,
+    [params.id],
+  );
+
+  if (row.rows.length === 0) {
+    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+    return;
+  }
+
+  res.status(200).json(row.rows[0]);
+});
+
+app.put('/places/:id', async (req: Request, res: Response) => {
+  const data = validate(UpdatePlaceSchema, { ...req.params, ...req.body }, res);
+  if (!data) return;
+
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+  if (payload.role !== 'admin') {
+    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    return;
+  }
+
+  const cityCheck = await pool.query('SELECT id FROM cities WHERE id = $1', [
+    data.cityId,
+  ]);
+  if (cityCheck.rows.length === 0) {
+    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+    return;
+  }
+
+  const row = await pool.query(
+    `UPDATE places SET name = $1, address = $2, latitude = $3, longitude = $4, city_id = $5, updated_at = NOW()
+     WHERE id = $6
+     RETURNING id, city_id AS "cityId", name, address, latitude, longitude, created_at AS "createdAt", updated_at AS "updatedAt"`,
+    [
+      data.name,
+      data.address,
+      data.latitude,
+      data.longitude,
+      data.cityId,
+      data.id,
+    ],
+  );
+
+  if (row.rows.length === 0) {
+    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+    return;
+  }
+
+  res.status(200).json(row.rows[0]);
+});
+
+app.delete('/places/:id', async (req: Request, res: Response) => {
+  const params = validate(IdParamSchema, req.params, res);
+  if (!params) return;
+
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+  if (payload.role !== 'admin') {
+    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    return;
+  }
+
+  try {
+    const row = await pool.query(
+      'DELETE FROM places WHERE id = $1 RETURNING id',
+      [params.id],
+    );
+
+    if (row.rows.length === 0) {
+      res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+      return;
+    }
+
+    res.status(200).end();
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      err.message.includes('violates foreign key constraint')
+    ) {
+      res.status(409).json({ code: 'PLACE_HAS_EVENTS_EXCEPTION' });
+      return;
+    }
+    throw err;
+  }
+});
+
 // --- events ---
 
 const CreateEventSchema = v.object({
   title: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
   description: v.string(),
-  latitude: v.pipe(v.number(), v.minValue(-90), v.maxValue(90)),
-  longitude: v.pipe(v.number(), v.minValue(-180), v.maxValue(180)),
+  placeId: UuidSchema,
   startDate: v.pipe(v.string(), v.isoTimestamp()),
   endDate: v.pipe(v.string(), v.isoTimestamp()),
   organisationId: v.optional(UuidSchema),
@@ -722,9 +1112,21 @@ app.post('/events', async (req: Request, res: Response) => {
     res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
     return;
   }
+  if (payload.role !== 'admin') {
+    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    return;
+  }
 
   const data = validate(CreateEventSchema, req.body, res);
   if (!data) return;
+
+  const placeCheck = await pool.query('SELECT id FROM places WHERE id = $1', [
+    data.placeId,
+  ]);
+  if (placeCheck.rows.length === 0) {
+    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+    return;
+  }
 
   if (data.organisationId != null) {
     const orgCheck = await pool.query(
@@ -735,32 +1137,22 @@ app.post('/events', async (req: Request, res: Response) => {
       res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
       return;
     }
-
-    if (payload.role !== 'admin') {
-      const organiserCheck = await pool.query(
-        'SELECT id FROM organisers WHERE human_id = $1 AND organisation_id = $2',
-        [payload.sub, data.organisationId],
-      );
-      if (organiserCheck.rows.length === 0) {
-        res.status(403).json({ code: 'NOT_ORGANISER_EXCEPTION' });
-        return;
-      }
-    }
   }
 
   const eventId = crypto.randomUUID();
   const row = await pool.query(
-    `INSERT INTO events (id, human_id, organisation_id, title, description, latitude, longitude, start_date, end_date)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-     RETURNING id, human_id AS "humanId", organisation_id AS "organisationId", title, description, latitude, longitude, start_date AS "startDate", end_date AS "endDate", created_at AS "createdAt"`,
+    `INSERT INTO events (id, human_id, organisation_id, place_id, title, description, start_date, end_date)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     RETURNING id, human_id AS "humanId", organisation_id AS "organisationId",
+               place_id AS "placeId", title, description,
+               start_date AS "startDate", end_date AS "endDate", created_at AS "createdAt"`,
     [
       eventId,
       payload.sub,
       data.organisationId ?? null,
+      data.placeId,
       data.title,
       data.description,
-      data.latitude,
-      data.longitude,
       data.startDate,
       data.endDate,
     ],
@@ -781,10 +1173,13 @@ app.get('/events', async (req: Request, res: Response) => {
     pool.query('SELECT COUNT(*) FROM events WHERE start_date >= CURRENT_DATE'),
     pool.query(
       `SELECT e.id, e.human_id AS "humanId", e.organisation_id AS "organisationId",
-              e.title, e.description, e.latitude, e.longitude,
+              e.title, e.description,
+              p.latitude, p.longitude, p.name AS "placeName", p.address AS "placeAddress",
               e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
               o.name AS "organisationName"
-       FROM events e LEFT JOIN organisations o ON o.id = e.organisation_id
+       FROM events e
+       JOIN places p ON p.id = e.place_id
+       LEFT JOIN organisations o ON o.id = e.organisation_id
        WHERE e.start_date >= CURRENT_DATE
        ORDER BY e.start_date ASC LIMIT $1 OFFSET $2`,
       [limit, offset],
@@ -827,13 +1222,16 @@ app.get('/events/area', async (req: Request, res: Response) => {
 
   const rows = await pool.query(
     `SELECT e.id, e.human_id AS "humanId", e.organisation_id AS "organisationId",
-            e.title, e.description, e.latitude, e.longitude,
+            e.title, e.description,
+            p.latitude, p.longitude, p.name AS "placeName", p.address AS "placeAddress",
             e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
             o.name AS "organisationName"
-     FROM events e LEFT JOIN organisations o ON o.id = e.organisation_id
+     FROM events e
+     JOIN places p ON p.id = e.place_id
+     LEFT JOIN organisations o ON o.id = e.organisation_id
      WHERE e.start_date >= CURRENT_DATE
-       AND e.latitude >= $1 AND e.latitude <= $2
-       AND e.longitude >= $3 AND e.longitude <= $4
+       AND p.latitude >= $1 AND p.latitude <= $2
+       AND p.longitude >= $3 AND p.longitude <= $4
      ORDER BY e.start_date ASC`,
     [query.minLat, query.maxLat, query.minLng, query.maxLng],
   );
@@ -847,10 +1245,13 @@ app.get('/events/:id', async (req: Request, res: Response) => {
 
   const row = await pool.query(
     `SELECT e.id, e.human_id AS "humanId", e.organisation_id AS "organisationId",
-            e.title, e.description, e.latitude, e.longitude,
+            e.place_id AS "placeId", e.title, e.description,
+            p.latitude, p.longitude, p.name AS "placeName", p.address AS "placeAddress",
             e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
             o.name AS "organisationName"
-     FROM events e LEFT JOIN organisations o ON o.id = e.organisation_id
+     FROM events e
+     JOIN places p ON p.id = e.place_id
+     LEFT JOIN organisations o ON o.id = e.organisation_id
      WHERE e.id = $1`,
     [params.id],
   );
@@ -867,8 +1268,7 @@ const UpdateEventSchema = v.object({
   id: UuidSchema,
   title: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
   description: v.string(),
-  latitude: v.pipe(v.number(), v.minValue(-90), v.maxValue(90)),
-  longitude: v.pipe(v.number(), v.minValue(-180), v.maxValue(180)),
+  placeId: UuidSchema,
   startDate: v.pipe(v.string(), v.isoTimestamp()),
   endDate: v.pipe(v.string(), v.isoTimestamp()),
   organisationId: v.optional(v.nullable(UuidSchema)),
@@ -883,30 +1283,25 @@ app.put('/events/:id', async (req: Request, res: Response) => {
     res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
     return;
   }
+  if (payload.role !== 'admin') {
+    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    return;
+  }
 
-  const existing = await pool.query(
-    'SELECT human_id, organisation_id FROM events WHERE id = $1',
-    [data.id],
-  );
+  const existing = await pool.query('SELECT id FROM events WHERE id = $1', [
+    data.id,
+  ]);
   if (existing.rows.length === 0) {
     res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
     return;
   }
 
-  const ev = existing.rows[0]!;
-  if (payload.role !== 'admin' && payload.sub !== ev.human_id) {
-    if (!ev.organisation_id) {
-      res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
-      return;
-    }
-    const organiserCheck = await pool.query(
-      'SELECT id FROM organisers WHERE human_id = $1 AND organisation_id = $2',
-      [payload.sub, ev.organisation_id],
-    );
-    if (organiserCheck.rows.length === 0) {
-      res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
-      return;
-    }
+  const placeCheck = await pool.query('SELECT id FROM places WHERE id = $1', [
+    data.placeId,
+  ]);
+  if (placeCheck.rows.length === 0) {
+    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+    return;
   }
 
   if (data.organisationId != null) {
@@ -921,14 +1316,15 @@ app.put('/events/:id', async (req: Request, res: Response) => {
   }
 
   const row = await pool.query(
-    `UPDATE events SET title = $1, description = $2, latitude = $3, longitude = $4, start_date = $5, end_date = $6, organisation_id = $7
-     WHERE id = $8
-     RETURNING id, human_id AS "humanId", organisation_id AS "organisationId", title, description, latitude, longitude, start_date AS "startDate", end_date AS "endDate", created_at AS "createdAt"`,
+    `UPDATE events SET title = $1, description = $2, place_id = $3, start_date = $4, end_date = $5, organisation_id = $6
+     WHERE id = $7
+     RETURNING id, human_id AS "humanId", organisation_id AS "organisationId",
+               place_id AS "placeId", title, description,
+               start_date AS "startDate", end_date AS "endDate", created_at AS "createdAt"`,
     [
       data.title,
       data.description,
-      data.latitude,
-      data.longitude,
+      data.placeId,
       data.startDate,
       data.endDate,
       data.organisationId ?? null,
@@ -948,33 +1344,20 @@ app.delete('/events/:id', async (req: Request, res: Response) => {
     res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
     return;
   }
-
-  const existing = await pool.query(
-    'SELECT human_id, organisation_id FROM events WHERE id = $1',
-    [params.id],
-  );
-  if (existing.rows.length === 0) {
-    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+  if (payload.role !== 'admin') {
+    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
     return;
   }
 
-  const ev = existing.rows[0]!;
-  if (payload.role !== 'admin' && payload.sub !== ev.human_id) {
-    if (!ev.organisation_id) {
-      res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
-      return;
-    }
-    const organiserCheck = await pool.query(
-      'SELECT id FROM organisers WHERE human_id = $1 AND organisation_id = $2',
-      [payload.sub, ev.organisation_id],
-    );
-    if (organiserCheck.rows.length === 0) {
-      res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
-      return;
-    }
-  }
+  const row = await pool.query(
+    'DELETE FROM events WHERE id = $1 RETURNING id',
+    [params.id],
+  );
 
-  await pool.query('DELETE FROM events WHERE id = $1', [params.id]);
+  if (row.rows.length === 0) {
+    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+    return;
+  }
 
   res.status(200).end();
 });
@@ -988,7 +1371,7 @@ const NAV_SCRIPT = `<script>
 try{const p=JSON.parse(atob(t.split('.')[1]));
 if(p.role==='admin'){const s=document.getElementById('adminNav');if(s)s.style.display='inline'}}catch{}})();
 </script>`;
-const APP_NAV = `<nav>[<a href="/">Events</a>] [<a href="/organisations-list">Organisations</a>] [<a href="/create-event">Create event</a>] <span id="adminNav" style="display:none">[<a href="/create-organisation">Create organisation</a>] </span>[<a href="/profile">Profile</a>]</nav>${NAV_SCRIPT}`;
+const APP_NAV = `<nav>[<a href="/">Events</a>] [<a href="/organisations-list">Organisations</a>] [<a href="/create-event">Create event</a>] <span id="adminNav" style="display:none">[<a href="/create-organisation">Create organisation</a>] [<a href="/countries-list">Countries</a>] [<a href="/cities-list">Cities</a>] [<a href="/places-list">Places</a>] </span>[<a href="/profile">Profile</a>]</nav>${NAV_SCRIPT}`;
 
 const ORG_SEARCH_HTML = `Organisation (optional)<br><input type="text" id="orgSearch" placeholder="Search by name..." autocomplete="off"><input type="hidden" name="organisationId" id="orgId"><div class="dropdown" id="orgDrop"></div>`;
 const ORG_SEARCH_SCRIPT = `
@@ -1014,6 +1397,31 @@ document.getElementById('orgSearch').oninput=function(){
   },300);
 };
 document.addEventListener('click',e=>{if(!e.target.closest('#orgSearch,#orgDrop'))document.getElementById('orgDrop').style.display='none'});`;
+
+const PLACE_SEARCH_HTML = `Place<br><input type="text" id="placeSearch" placeholder="Search by name or address..." autocomplete="off" required><input type="hidden" name="placeId" id="placeId" required><div class="dropdown" id="placeDrop"></div>`;
+const PLACE_SEARCH_SCRIPT = `
+let placeDebounce;
+document.getElementById('placeSearch').oninput=function(){
+  clearTimeout(placeDebounce);
+  const v=this.value;
+  const drop=document.getElementById('placeDrop');
+  if(v.length<2){drop.style.display='none';document.getElementById('placeId').value='';return}
+  placeDebounce=setTimeout(async()=>{
+    const r=await fetch('/places?search='+encodeURIComponent(v)+'&limit=10');
+    if(!r.ok)return;
+    const j=await r.json();
+    drop.innerHTML='';
+    if(j.data.length===0){drop.style.display='none';return}
+    for(const p of j.data){
+      const d=document.createElement('div');
+      d.textContent=p.name+' - '+p.address;
+      d.onclick=()=>{document.getElementById('placeSearch').value=p.name+' - '+p.address;document.getElementById('placeId').value=p.id;drop.style.display='none'};
+      drop.appendChild(d);
+    }
+    drop.style.display='block';
+  },300);
+};
+document.addEventListener('click',e=>{if(!e.target.closest('#placeSearch,#placeDrop'))document.getElementById('placeDrop').style.display='none'});`;
 
 app.get('/', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>
@@ -1226,19 +1634,26 @@ try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
   const ev=await r.json();
   document.getElementById('title').textContent=ev.title;
   let html='<p>'+esc(ev.description)+'</p>'
-    +'<p>Latitude: '+ev.latitude+'</p>'
-    +'<p>Longitude: '+ev.longitude+'</p>'
+    +'<p>Place: '+esc(ev.placeName)+' - '+esc(ev.placeAddress)+'</p>'
     +'<p>Start: '+new Date(ev.startDate).toLocaleString()+'</p>'
     +'<p>End: '+new Date(ev.endDate).toLocaleString()+'</p>'
     +'<p>Created: '+new Date(ev.createdAt).toLocaleString()+'</p>';
   if(ev.organisationId)html+='<p>Organisation: <a href="/view/organisation/'+ev.organisationId+'">'+esc(ev.organisationName||ev.organisationId)+'</a></p>';
-  let canEdit=me.role==='admin'||me.sub===ev.humanId;
-  if(!canEdit&&ev.organisationId){
-    const cr=await fetch('/organisations/'+ev.organisationId+'/organisers/check?humanId='+me.sub);
-    if(cr.ok){const cj=await cr.json();canEdit=cj.isOrganiser}
+  const canEdit=me.role==='admin';
+  if(canEdit){
+    html+='<br><a href="/edit/event/'+ev.id+'">[edit]</a>';
+    html+=' <a href="#" id="deleteBtn">[delete]</a>';
   }
-  if(canEdit)html+='<br><a href="/edit/event/'+ev.id+'">[edit]</a>';
   document.getElementById('detail').innerHTML=html;
+  if(canEdit){
+    document.getElementById('deleteBtn').onclick=async function(e){
+      e.preventDefault();
+      if(!confirm('Delete this event?'))return;
+      const dr=await fetch('/events/'+id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
+      if(!dr.ok){const dj=await dr.json();document.getElementById('err').textContent=dj.code||JSON.stringify(dj);return}
+      window.location.href='/';
+    };
+  }
 })();
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 </script>
@@ -1268,15 +1683,14 @@ const t=localStorage.getItem('accessToken');
 let me={};
 try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
 (async()=>{
-  const r=await fetch('/organisations/'+id,{headers:{'Authorization':'Bearer '+t}});
+  const r=await fetch('/organisations/'+id);
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const o=await r.json();
   document.getElementById('title').textContent=o.name;
   let html='<p>Name: '+esc(o.name)+'</p>'
     +'<p>Created: '+new Date(o.createdAt).toLocaleString()+'</p>';
-  if(o.isOrganiser||me.role==='admin'){
+  if(me.role==='admin'){
     html+='<br><a href="/edit/organisation/'+o.id+'">[edit]</a>';
-    html+=' <a href="/manage/organisation/'+o.id+'/organisers">[manage organisers]</a>';
   }
   document.getElementById('detail').innerHTML=html;
   document.getElementById('eventsSection').style.display='block';
@@ -1339,8 +1753,7 @@ ${APP_NAV}
 <form id="f">
 Title<br><input type="text" name="title" required><br>
 Description<br><input type="text" name="description" required><br>
-Latitude<br><input type="number" name="latitude" step="any" min="-90" max="90" required><br>
-Longitude<br><input type="number" name="longitude" step="any" min="-180" max="180" required><br>
+${PLACE_SEARCH_HTML}<br>
 Start<br><input type="datetime-local" name="startDate" required><br>
 End<br><input type="datetime-local" name="endDate" required><br>
 ${ORG_SEARCH_HTML}<br>
@@ -1350,11 +1763,14 @@ ${ORG_SEARCH_HTML}<br>
 </div>
 <script>
 if(!localStorage.getItem('accessToken'))window.location.href='/login';
+try{const p=JSON.parse(atob(localStorage.getItem('accessToken').split('.')[1]));if(p.role!=='admin')window.location.href='/'}catch{window.location.href='/login'}
+${PLACE_SEARCH_SCRIPT}
 ${ORG_SEARCH_SCRIPT}
 document.getElementById('f').onsubmit=async e=>{
   e.preventDefault();
   const fd=Object.fromEntries(new FormData(e.target));
-  const body={title:fd.title,description:fd.description,latitude:Number(fd.latitude),longitude:Number(fd.longitude),startDate:new Date(fd.startDate).toISOString(),endDate:new Date(fd.endDate).toISOString()};
+  if(!fd.placeId){document.getElementById('err').textContent='Please select a place';return}
+  const body={title:fd.title,description:fd.description,placeId:fd.placeId,startDate:new Date(fd.startDate).toISOString(),endDate:new Date(fd.endDate).toISOString()};
   if(fd.organisationId)body.organisationId=fd.organisationId;
   const r=await fetch('/events',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('accessToken')},body:JSON.stringify(body)});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
@@ -1374,8 +1790,7 @@ ${APP_NAV}
 <form id="f">
 Title<br><input type="text" name="title" required><br>
 Description<br><input type="text" name="description" required><br>
-Latitude<br><input type="number" name="latitude" step="any" min="-90" max="90" required><br>
-Longitude<br><input type="number" name="longitude" step="any" min="-180" max="180" required><br>
+${PLACE_SEARCH_HTML}<br>
 Start<br><input type="datetime-local" name="startDate" required><br>
 End<br><input type="datetime-local" name="endDate" required><br>
 ${ORG_SEARCH_HTML}<br>
@@ -1385,7 +1800,9 @@ ${ORG_SEARCH_HTML}<br>
 </div>
 <script>
 if(!localStorage.getItem('accessToken'))window.location.href='/login';
+try{const p=JSON.parse(atob(localStorage.getItem('accessToken').split('.')[1]));if(p.role!=='admin')window.location.href='/'}catch{window.location.href='/login'}
 const eventId=window.location.pathname.split('/').pop();
+${PLACE_SEARCH_SCRIPT}
 ${ORG_SEARCH_SCRIPT}
 (async()=>{
   const r=await fetch('/events/'+eventId);
@@ -1394,10 +1811,12 @@ ${ORG_SEARCH_SCRIPT}
   const f=document.getElementById('f');
   f.title.value=ev.title;
   f.description.value=ev.description;
-  f.latitude.value=ev.latitude;
-  f.longitude.value=ev.longitude;
   f.startDate.value=ev.startDate.slice(0,16);
   f.endDate.value=ev.endDate.slice(0,16);
+  if(ev.placeId){
+    document.getElementById('placeId').value=ev.placeId;
+    document.getElementById('placeSearch').value=ev.placeName+' - '+ev.placeAddress;
+  }
   if(ev.organisationId){
     document.getElementById('orgId').value=ev.organisationId;
     const or=await fetch('/organisations/'+ev.organisationId);
@@ -1407,7 +1826,8 @@ ${ORG_SEARCH_SCRIPT}
 document.getElementById('f').onsubmit=async e=>{
   e.preventDefault();
   const fd=Object.fromEntries(new FormData(e.target));
-  const body={title:fd.title,description:fd.description,latitude:Number(fd.latitude),longitude:Number(fd.longitude),startDate:new Date(fd.startDate).toISOString(),endDate:new Date(fd.endDate).toISOString()};
+  if(!fd.placeId){document.getElementById('err').textContent='Please select a place';return}
+  const body={title:fd.title,description:fd.description,placeId:fd.placeId,startDate:new Date(fd.startDate).toISOString(),endDate:new Date(fd.endDate).toISOString()};
   if(fd.organisationId)body.organisationId=fd.organisationId;
   else body.organisationId=null;
   const r=await fetch('/events/'+eventId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('accessToken')},body:JSON.stringify(body)});
@@ -1460,6 +1880,7 @@ Name<br><input type="text" name="name" minlength="1" maxlength="256" required><b
 </div>
 <script>
 if(!localStorage.getItem('accessToken'))window.location.href='/login';
+try{const p=JSON.parse(atob(localStorage.getItem('accessToken').split('.')[1]));if(p.role!=='admin')window.location.href='/'}catch{window.location.href='/login'}
 const orgId=window.location.pathname.split('/').pop();
 (async()=>{
   const r=await fetch('/organisations/'+orgId);
@@ -1478,96 +1899,369 @@ document.getElementById('f').onsubmit=async e=>{
 </body></html>`);
 });
 
-app.get(
-  '/manage/organisation/:id/organisers',
-  (_req: Request, res: Response) => {
-    res.type('html').send(`<!DOCTYPE html>
-<html><head><title>Manage organisers</title>${PAGE_HEAD}</head><body>
+// --- admin pages: countries, cities, places ---
+
+app.get('/countries-list', (_req: Request, res: Response) => {
+  res.type('html').send(`<!DOCTYPE html>
+<html><head><title>Countries</title>${PAGE_HEAD}</head><body>
 <div class="c">
-<h1 id="title">Manage organisers</h1>
+<h1>Countries</h1>
 ${APP_NAV}
 <hr>
-<p><a id="back" href="#">&larr; Back to organisation</a></p>
+<div id="createForm">
+<b>Add country</b><br>
+<input type="text" id="countryName" placeholder="Country name" required>
+<button id="createBtn">Create</button>
+</div>
 <br>
-<b>Add organiser</b><br>
-<input type="text" id="humanSearch" placeholder="Search by nickname..." autocomplete="off">
-<div class="dropdown" id="humanDrop"></div>
-<br>
-<b>Current organisers</b>
+<div id="editForm" style="display:none">
+<b>Edit country</b><br>
+<input type="text" id="editName" placeholder="Country name" required>
+<button id="saveBtn">Save</button> <button id="cancelBtn">Cancel</button>
+</div>
+<hr>
 <div id="list"></div>
 <p id="err"></p>
 </div>
 <script>
 if(!localStorage.getItem('accessToken'))window.location.href='/login';
-const parts=window.location.pathname.split('/');
-const orgId=parts[3];
+try{const p=JSON.parse(atob(localStorage.getItem('accessToken').split('.')[1]));if(p.role!=='admin')window.location.href='/'}catch{window.location.href='/login'}
 const t=localStorage.getItem('accessToken');
-let me={};
-try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
-document.getElementById('back').href='/view/organisation/'+orgId;
-let debounce;
-document.getElementById('humanSearch').oninput=function(){
-  clearTimeout(debounce);
-  const v=this.value;
-  const drop=document.getElementById('humanDrop');
-  if(v.length<2){drop.style.display='none';return}
-  debounce=setTimeout(async()=>{
-    const r=await fetch('/humans?nickname='+encodeURIComponent(v));
-    if(!r.ok)return;
-    const humans=await r.json();
-    drop.innerHTML='';
-    if(humans.length===0){drop.style.display='none';return}
-    for(const h of humans){
-      const d=document.createElement('div');
-      d.textContent=h.nickname;
-      d.onclick=async()=>{
-        drop.style.display='none';
-        document.getElementById('humanSearch').value='';
-        const r=await fetch('/organisations/'+orgId+'/organisers',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({humanId:h.id})});
-        if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
-        document.getElementById('err').textContent='';
-        loadOrganisers();
-      };
-      drop.appendChild(d);
-    }
-    drop.style.display='block';
-  },300);
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+let editId=null;
+
+document.getElementById('createBtn').onclick=async()=>{
+  const name=document.getElementById('countryName').value.trim();
+  if(!name)return;
+  const r=await fetch('/countries',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name})});
+  if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+  document.getElementById('countryName').value='';
+  document.getElementById('err').textContent='';
+  loadList();
 };
-document.addEventListener('click',e=>{if(!e.target.closest('#humanSearch,#humanDrop'))document.getElementById('humanDrop').style.display='none'});
-async function loadOrganisers(){
-  const r=await fetch('/organisations/'+orgId+'/organisers',{headers:{'Authorization':'Bearer '+t}});
-  if(!r.ok){document.getElementById('err').textContent='Could not load organisers';return}
-  const organisers=await r.json();
+
+document.getElementById('saveBtn').onclick=async()=>{
+  const name=document.getElementById('editName').value.trim();
+  if(!name||!editId)return;
+  const r=await fetch('/countries/'+editId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name})});
+  if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+  document.getElementById('editForm').style.display='none';
+  document.getElementById('createForm').style.display='block';
+  editId=null;
+  document.getElementById('err').textContent='';
+  loadList();
+};
+
+document.getElementById('cancelBtn').onclick=()=>{
+  document.getElementById('editForm').style.display='none';
+  document.getElementById('createForm').style.display='block';
+  editId=null;
+};
+
+async function loadList(){
+  const r=await fetch('/countries?limit=100');
+  if(!r.ok)return;
+  const j=await r.json();
   const list=document.getElementById('list');
   list.innerHTML='';
-  const firstId=organisers.length>0?organisers[0].humanId:null;
-  for(const o of organisers){
+  for(const c of j.data){
     const d=document.createElement('div');
-    let html=esc(o.nickname)+' <small>('+o.humanId.slice(0,8)+'...)</small>';
-    const isFirst=o.humanId===firstId;
-    const canRemove=me.role==='admin'||(o.humanId===me.sub)||(!isFirst);
-    if(canRemove)html+=' <a href="#" class="rm" data-hid="'+o.humanId+'">[remove]</a>';
-    if(isFirst)html+=' <small>(first organiser)</small>';
-    d.innerHTML=html+'<hr>';
+    d.innerHTML=esc(c.name)+' <a href="#" class="edit" data-id="'+c.id+'" data-name="'+esc(c.name)+'">[edit]</a> <a href="#" class="del" data-id="'+c.id+'">[delete]</a><hr>';
     list.appendChild(d);
   }
-  list.querySelectorAll('.rm').forEach(a=>{
+  list.querySelectorAll('.edit').forEach(a=>{
+    a.onclick=e=>{
+      e.preventDefault();
+      editId=a.dataset.id;
+      document.getElementById('editName').value=a.dataset.name;
+      document.getElementById('editForm').style.display='block';
+      document.getElementById('createForm').style.display='none';
+    };
+  });
+  list.querySelectorAll('.del').forEach(a=>{
     a.onclick=async e=>{
       e.preventDefault();
-      const hid=a.dataset.hid;
-      const r=await fetch('/organisations/'+orgId+'/organisers/'+hid,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
+      if(!confirm('Delete this country?'))return;
+      const r=await fetch('/countries/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
       if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
       document.getElementById('err').textContent='';
-      loadOrganisers();
+      loadList();
     };
   });
 }
-function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
-loadOrganisers();
+loadList();
 </script>
 </body></html>`);
-  },
-);
+});
+
+app.get('/cities-list', (_req: Request, res: Response) => {
+  res.type('html').send(`<!DOCTYPE html>
+<html><head><title>Cities</title>${PAGE_HEAD}</head><body>
+<div class="c">
+<h1>Cities</h1>
+${APP_NAV}
+<hr>
+<div id="createForm">
+<b>Add city</b><br>
+Name<br><input type="text" id="cityName" placeholder="City name" required><br>
+Country<br><select id="countrySelect"><option value="">-- select --</option></select><br><br>
+<button id="createBtn">Create</button>
+</div>
+<br>
+<div id="editForm" style="display:none">
+<b>Edit city</b><br>
+Name<br><input type="text" id="editName" placeholder="City name" required><br>
+Country<br><select id="editCountrySelect"><option value="">-- select --</option></select><br><br>
+<button id="saveBtn">Save</button> <button id="cancelBtn">Cancel</button>
+</div>
+<hr>
+Filter by country: <select id="filterCountry"><option value="">All</option></select>
+<hr>
+<div id="list"></div>
+<p id="err"></p>
+</div>
+<script>
+if(!localStorage.getItem('accessToken'))window.location.href='/login';
+try{const p=JSON.parse(atob(localStorage.getItem('accessToken').split('.')[1]));if(p.role!=='admin')window.location.href='/'}catch{window.location.href='/login'}
+const t=localStorage.getItem('accessToken');
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+let editId=null;
+let countries=[];
+
+async function loadCountries(){
+  const r=await fetch('/countries?limit=100');
+  if(!r.ok)return;
+  const j=await r.json();
+  countries=j.data;
+  for(const sel of [document.getElementById('countrySelect'),document.getElementById('editCountrySelect'),document.getElementById('filterCountry')]){
+    const val=sel.value;
+    const first=sel.options[0];
+    sel.innerHTML='';
+    sel.appendChild(first);
+    for(const c of countries){
+      const o=document.createElement('option');
+      o.value=c.id;o.textContent=c.name;
+      sel.appendChild(o);
+    }
+    sel.value=val;
+  }
+}
+
+document.getElementById('filterCountry').onchange=()=>loadList();
+
+document.getElementById('createBtn').onclick=async()=>{
+  const name=document.getElementById('cityName').value.trim();
+  const countryId=document.getElementById('countrySelect').value;
+  if(!name||!countryId)return;
+  const r=await fetch('/cities',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name,countryId})});
+  if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+  document.getElementById('cityName').value='';
+  document.getElementById('err').textContent='';
+  loadList();
+};
+
+document.getElementById('saveBtn').onclick=async()=>{
+  const name=document.getElementById('editName').value.trim();
+  const countryId=document.getElementById('editCountrySelect').value;
+  if(!name||!countryId||!editId)return;
+  const r=await fetch('/cities/'+editId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name,countryId})});
+  if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+  document.getElementById('editForm').style.display='none';
+  document.getElementById('createForm').style.display='block';
+  editId=null;
+  document.getElementById('err').textContent='';
+  loadList();
+};
+
+document.getElementById('cancelBtn').onclick=()=>{
+  document.getElementById('editForm').style.display='none';
+  document.getElementById('createForm').style.display='block';
+  editId=null;
+};
+
+async function loadList(){
+  const countryId=document.getElementById('filterCountry').value;
+  let url='/cities?limit=100';
+  if(countryId)url+='&countryId='+countryId;
+  const r=await fetch(url);
+  if(!r.ok)return;
+  const j=await r.json();
+  const list=document.getElementById('list');
+  list.innerHTML='';
+  for(const c of j.data){
+    const d=document.createElement('div');
+    d.innerHTML=esc(c.name)+' <small>('+esc(c.countryName)+')</small> <a href="#" class="edit" data-id="'+c.id+'" data-name="'+esc(c.name)+'" data-country="'+c.countryId+'">[edit]</a> <a href="#" class="del" data-id="'+c.id+'">[delete]</a><hr>';
+    list.appendChild(d);
+  }
+  list.querySelectorAll('.edit').forEach(a=>{
+    a.onclick=e=>{
+      e.preventDefault();
+      editId=a.dataset.id;
+      document.getElementById('editName').value=a.dataset.name;
+      document.getElementById('editCountrySelect').value=a.dataset.country;
+      document.getElementById('editForm').style.display='block';
+      document.getElementById('createForm').style.display='none';
+    };
+  });
+  list.querySelectorAll('.del').forEach(a=>{
+    a.onclick=async e=>{
+      e.preventDefault();
+      if(!confirm('Delete this city?'))return;
+      const r=await fetch('/cities/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
+      if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+      document.getElementById('err').textContent='';
+      loadList();
+    };
+  });
+}
+loadCountries().then(()=>loadList());
+</script>
+</body></html>`);
+});
+
+app.get('/places-list', (_req: Request, res: Response) => {
+  res.type('html').send(`<!DOCTYPE html>
+<html><head><title>Places</title>${PAGE_HEAD}</head><body>
+<div class="c">
+<h1>Places</h1>
+${APP_NAV}
+<hr>
+<div id="createForm">
+<b>Add place</b><br>
+Name<br><input type="text" id="placeName" placeholder="Place name" required><br>
+Address<br><input type="text" id="placeAddress" placeholder="Address" required><br>
+Latitude<br><input type="number" id="placeLat" step="any" min="-90" max="90" required><br>
+Longitude<br><input type="number" id="placeLng" step="any" min="-180" max="180" required><br>
+City<br><select id="citySelect"><option value="">-- select --</option></select><br><br>
+<button id="createBtn">Create</button>
+</div>
+<br>
+<div id="editForm" style="display:none">
+<b>Edit place</b><br>
+Name<br><input type="text" id="editName" placeholder="Place name" required><br>
+Address<br><input type="text" id="editAddress" placeholder="Address" required><br>
+Latitude<br><input type="number" id="editLat" step="any" min="-90" max="90" required><br>
+Longitude<br><input type="number" id="editLng" step="any" min="-180" max="180" required><br>
+City<br><select id="editCitySelect"><option value="">-- select --</option></select><br><br>
+<button id="saveBtn">Save</button> <button id="cancelBtn">Cancel</button>
+</div>
+<hr>
+Filter by city: <select id="filterCity"><option value="">All</option></select>
+<hr>
+<div id="list"></div>
+<p id="err"></p>
+</div>
+<script>
+if(!localStorage.getItem('accessToken'))window.location.href='/login';
+try{const p=JSON.parse(atob(localStorage.getItem('accessToken').split('.')[1]));if(p.role!=='admin')window.location.href='/'}catch{window.location.href='/login'}
+const t=localStorage.getItem('accessToken');
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+let editId=null;
+
+async function loadCities(){
+  const r=await fetch('/cities?limit=100');
+  if(!r.ok)return;
+  const j=await r.json();
+  for(const sel of [document.getElementById('citySelect'),document.getElementById('editCitySelect'),document.getElementById('filterCity')]){
+    const val=sel.value;
+    const first=sel.options[0];
+    sel.innerHTML='';
+    sel.appendChild(first);
+    for(const c of j.data){
+      const o=document.createElement('option');
+      o.value=c.id;o.textContent=c.name+' ('+c.countryName+')';
+      sel.appendChild(o);
+    }
+    sel.value=val;
+  }
+}
+
+document.getElementById('filterCity').onchange=()=>loadList();
+
+document.getElementById('createBtn').onclick=async()=>{
+  const name=document.getElementById('placeName').value.trim();
+  const address=document.getElementById('placeAddress').value.trim();
+  const latitude=Number(document.getElementById('placeLat').value);
+  const longitude=Number(document.getElementById('placeLng').value);
+  const cityId=document.getElementById('citySelect').value;
+  if(!name||!address||!cityId)return;
+  const r=await fetch('/places',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name,address,latitude,longitude,cityId})});
+  if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+  document.getElementById('placeName').value='';
+  document.getElementById('placeAddress').value='';
+  document.getElementById('placeLat').value='';
+  document.getElementById('placeLng').value='';
+  document.getElementById('err').textContent='';
+  loadList();
+};
+
+document.getElementById('saveBtn').onclick=async()=>{
+  const name=document.getElementById('editName').value.trim();
+  const address=document.getElementById('editAddress').value.trim();
+  const latitude=Number(document.getElementById('editLat').value);
+  const longitude=Number(document.getElementById('editLng').value);
+  const cityId=document.getElementById('editCitySelect').value;
+  if(!name||!address||!cityId||!editId)return;
+  const r=await fetch('/places/'+editId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name,address,latitude,longitude,cityId})});
+  if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+  document.getElementById('editForm').style.display='none';
+  document.getElementById('createForm').style.display='block';
+  editId=null;
+  document.getElementById('err').textContent='';
+  loadList();
+};
+
+document.getElementById('cancelBtn').onclick=()=>{
+  document.getElementById('editForm').style.display='none';
+  document.getElementById('createForm').style.display='block';
+  editId=null;
+};
+
+async function loadList(){
+  const cityId=document.getElementById('filterCity').value;
+  let url='/places?limit=100';
+  if(cityId)url+='&cityId='+cityId;
+  const r=await fetch(url);
+  if(!r.ok)return;
+  const j=await r.json();
+  const list=document.getElementById('list');
+  list.innerHTML='';
+  for(const p of j.data){
+    const d=document.createElement('div');
+    d.innerHTML='<b>'+esc(p.name)+'</b><br>'+esc(p.address)+' <small>('+esc(p.cityName)+', '+esc(p.countryName)+')</small><br>'
+      +'<small>Lat: '+p.latitude+', Lng: '+p.longitude+'</small> '
+      +'<a href="#" class="edit" data-id="'+p.id+'" data-name="'+esc(p.name)+'" data-address="'+esc(p.address)+'" data-lat="'+p.latitude+'" data-lng="'+p.longitude+'" data-city="'+p.cityId+'">[edit]</a> '
+      +'<a href="#" class="del" data-id="'+p.id+'">[delete]</a><hr>';
+    list.appendChild(d);
+  }
+  list.querySelectorAll('.edit').forEach(a=>{
+    a.onclick=e=>{
+      e.preventDefault();
+      editId=a.dataset.id;
+      document.getElementById('editName').value=a.dataset.name;
+      document.getElementById('editAddress').value=a.dataset.address;
+      document.getElementById('editLat').value=a.dataset.lat;
+      document.getElementById('editLng').value=a.dataset.lng;
+      document.getElementById('editCitySelect').value=a.dataset.city;
+      document.getElementById('editForm').style.display='block';
+      document.getElementById('createForm').style.display='none';
+    };
+  });
+  list.querySelectorAll('.del').forEach(a=>{
+    a.onclick=async e=>{
+      e.preventDefault();
+      if(!confirm('Delete this place?'))return;
+      const r=await fetch('/places/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
+      if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+      document.getElementById('err').textContent='';
+      loadList();
+    };
+  });
+}
+loadCities().then(()=>loadList());
+</script>
+</body></html>`);
+});
 
 app.get('/profile', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>

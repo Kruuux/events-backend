@@ -1,0 +1,12 @@
+CREATE TABLE places (
+  id TEXT PRIMARY KEY,
+  city_id TEXT NOT NULL REFERENCES cities(id) ON DELETE CASCADE,
+  name VARCHAR(256) NOT NULL,
+  address TEXT NOT NULL,
+  latitude DOUBLE PRECISION NOT NULL,
+  longitude DOUBLE PRECISION NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_places_city_id ON places(city_id);
