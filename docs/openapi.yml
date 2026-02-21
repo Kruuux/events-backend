@@ -131,6 +131,41 @@ paths:
               example:
                 code: UNAUTHORIZED_EXCEPTION
 
+  /humans:
+    get:
+      summary: Search humans by nickname
+      parameters:
+        - name: nickname
+          in: query
+          required: true
+          description: Partial nickname search (min 2 chars, case-insensitive)
+          schema:
+            type: string
+            minLength: 2
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+            maximum: 50
+      responses:
+        "200":
+          description: List of matching humans
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                      format: uuid
+                    nickname:
+                      type: string
+        "400":
+          $ref: "#/components/responses/ValidationException"
+
   /organisations:
     post:
       summary: Create organisation (admin only)
@@ -225,6 +260,10 @@ paths:
   /organisations/{id}:
     get:
       summary: Get organisation by ID
+      description: Returns isOrganiser flag when authenticated (true if admin or organiser)
+      security:
+        - bearerAuth: []
+        - {}
       parameters:
         - name: id
           in: path
@@ -238,7 +277,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Organisation"
+                allOf:
+                  - $ref: "#/components/schemas/Organisation"
+                  - type: object
+                    properties:
+                      isOrganiser:
+                        type: boolean
         "400":
           $ref: "#/components/responses/ValidationException"
         "404":
@@ -358,7 +402,7 @@ paths:
 
   /organisations/{organisationId}/organisers:
     post:
-      summary: Assign human to organisation (admin only)
+      summary: Assign human to organisation (admin or existing organiser)
       security:
         - bearerAuth: []
       parameters:
@@ -397,13 +441,13 @@ paths:
               example:
                 code: UNAUTHORIZED_EXCEPTION
         "403":
-          description: Admin only
+          description: Not admin or existing organiser
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorCode"
               example:
-                code: ADMIN_ONLY_EXCEPTION
+                code: FORBIDDEN_EXCEPTION
         "404":
           description: Organisation or human not found
           content:
@@ -421,9 +465,55 @@ paths:
               example:
                 code: ALREADY_ORGANISER_EXCEPTION
 
+    get:
+      summary: List organisation organisers (admin or existing organiser)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: organisationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: List of organisers with nicknames
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  allOf:
+                    - $ref: "#/components/schemas/Organiser"
+                    - type: object
+                      properties:
+                        nickname:
+                          type: string
+        "401":
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: UNAUTHORIZED_EXCEPTION
+        "403":
+          description: Not admin or existing organiser
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: FORBIDDEN_EXCEPTION
+
   /organisations/{organisationId}/organisers/{humanId}:
     delete:
-      summary: Unassign human from organisation (admin only)
+      summary: Remove organiser (admin or existing organiser with restrictions)
+      description: |
+        Admin can remove any organiser. Members can remove themselves or other
+        non-first organisers. The first organiser (earliest created_at) can only
+        be removed by an admin.
       security:
         - bearerAuth: []
       parameters:
@@ -453,21 +543,18 @@ paths:
               example:
                 code: UNAUTHORIZED_EXCEPTION
         "403":
-          description: Admin only
+          description: Not authorized to remove this organiser
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorCode"
-              example:
-                code: ADMIN_ONLY_EXCEPTION
-        "404":
-          description: Organisation or human not found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorCode"
-              example:
-                code: RESOURCE_NOT_FOUND_EXCEPTION
+              examples:
+                forbidden:
+                  value:
+                    code: FORBIDDEN_EXCEPTION
+                firstOrganiser:
+                  value:
+                    code: CANNOT_REMOVE_FIRST_ORGANISER_EXCEPTION
         "409":
           description: Human is not an organiser
           content:
@@ -822,6 +909,9 @@ components:
         organisationId:
           type: string
           format: uuid
+          nullable: true
+        organisationName:
+          type: string
           nullable: true
         title:
           type: string

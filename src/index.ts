@@ -261,6 +261,29 @@ app.post('/logout-all', async (req: Request, res: Response) => {
   res.status(200).end();
 });
 
+// --- humans ---
+
+const HumanSearchSchema = v.object({
+  nickname: v.pipe(v.string(), v.minLength(2)),
+  limit: v.optional(v.pipe(v.string(), v.regex(/^\d+$/)), '10'),
+});
+
+app.get('/humans', async (req: Request, res: Response) => {
+  const query = validate(HumanSearchSchema, req.query, res);
+  if (!query) return;
+
+  const limit = Math.min(50, Math.max(1, Number(query.limit)));
+
+  const rows = await pool.query(
+    `SELECT id, nickname FROM humans
+     WHERE nickname ILIKE '%' || $1 || '%'
+     ORDER BY nickname ASC LIMIT $2`,
+    [query.nickname, limit],
+  );
+
+  res.status(200).json(rows.rows);
+});
+
 // --- organisations ---
 
 const CreateOrganisationSchema = v.object({
@@ -349,7 +372,22 @@ app.get('/organisations/:id', async (req: Request, res: Response) => {
     return;
   }
 
-  res.status(200).json(row.rows[0]);
+  const org = row.rows[0]!;
+  const payload = authenticate(req);
+  let isOrganiser = false;
+  if (payload) {
+    if (payload.role === 'admin') {
+      isOrganiser = true;
+    } else {
+      const check = await pool.query(
+        'SELECT id FROM organisers WHERE human_id = $1 AND organisation_id = $2',
+        [payload.sub, params.id],
+      );
+      isOrganiser = check.rows.length > 0;
+    }
+  }
+
+  res.status(200).json({ ...org, isOrganiser });
 });
 
 const UpdateOrganisationSchema = v.object({
@@ -458,9 +496,16 @@ app.post(
       res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
       return;
     }
+
     if (payload.role !== 'admin') {
-      res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
-      return;
+      const selfCheck = await pool.query(
+        'SELECT id FROM organisers WHERE human_id = $1 AND organisation_id = $2',
+        [payload.sub, data.organisationId],
+      );
+      if (selfCheck.rows.length === 0) {
+        res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
+        return;
+      }
     }
 
     const orgCheck = await pool.query(
@@ -511,26 +556,28 @@ app.delete(
       res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
       return;
     }
+
     if (payload.role !== 'admin') {
-      res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
-      return;
-    }
+      const selfCheck = await pool.query(
+        'SELECT id FROM organisers WHERE human_id = $1 AND organisation_id = $2',
+        [payload.sub, data.organisationId],
+      );
+      if (selfCheck.rows.length === 0) {
+        res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
+        return;
+      }
 
-    const orgCheck = await pool.query(
-      'SELECT id FROM organisations WHERE id = $1',
-      [data.organisationId],
-    );
-    if (orgCheck.rows.length === 0) {
-      res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
-      return;
-    }
-
-    const humanCheck = await pool.query('SELECT id FROM humans WHERE id = $1', [
-      data.humanId,
-    ]);
-    if (humanCheck.rows.length === 0) {
-      res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
-      return;
+      // members can only remove themselves or other non-first organisers
+      if (data.humanId !== payload.sub) {
+        const firstOrganiser = await pool.query(
+          'SELECT human_id FROM organisers WHERE organisation_id = $1 ORDER BY created_at ASC LIMIT 1',
+          [data.organisationId],
+        );
+        if (firstOrganiser.rows.length > 0 && firstOrganiser.rows[0]!.human_id === data.humanId) {
+          res.status(403).json({ code: 'CANNOT_REMOVE_FIRST_ORGANISER_EXCEPTION' });
+          return;
+        }
+      }
     }
 
     const row = await pool.query(
@@ -544,6 +591,41 @@ app.delete(
     }
 
     res.status(200).end();
+  },
+);
+
+app.get(
+  '/organisations/:organisationId/organisers',
+  async (req: Request, res: Response) => {
+    const payload = authenticate(req);
+    if (!payload) {
+      res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+      return;
+    }
+
+    const organisationId = req.params.organisationId;
+
+    if (payload.role !== 'admin') {
+      const selfCheck = await pool.query(
+        'SELECT id FROM organisers WHERE human_id = $1 AND organisation_id = $2',
+        [payload.sub, organisationId],
+      );
+      if (selfCheck.rows.length === 0) {
+        res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
+        return;
+      }
+    }
+
+    const rows = await pool.query(
+      `SELECT o.id, o.human_id AS "humanId", o.organisation_id AS "organisationId",
+              o.created_at AS "createdAt", h.nickname
+       FROM organisers o JOIN humans h ON h.id = o.human_id
+       WHERE o.organisation_id = $1
+       ORDER BY o.created_at ASC`,
+      [organisationId],
+    );
+
+    res.status(200).json(rows.rows);
   },
 );
 
@@ -645,8 +727,12 @@ app.get('/events', async (req: Request, res: Response) => {
   const [countResult, rows] = await Promise.all([
     pool.query('SELECT COUNT(*) FROM events'),
     pool.query(
-      `SELECT id, human_id AS "humanId", organisation_id AS "organisationId", title, description, latitude, longitude, start_date AS "startDate", end_date AS "endDate", created_at AS "createdAt"
-       FROM events ORDER BY start_date ASC LIMIT $1 OFFSET $2`,
+      `SELECT e.id, e.human_id AS "humanId", e.organisation_id AS "organisationId",
+              e.title, e.description, e.latitude, e.longitude,
+              e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
+              o.name AS "organisationName"
+       FROM events e LEFT JOIN organisations o ON o.id = e.organisation_id
+       ORDER BY e.start_date ASC LIMIT $1 OFFSET $2`,
       [limit, offset],
     ),
   ]);
@@ -661,8 +747,12 @@ app.get('/events/:id', async (req: Request, res: Response) => {
   if (!params) return;
 
   const row = await pool.query(
-    `SELECT id, human_id AS "humanId", organisation_id AS "organisationId", title, description, latitude, longitude, start_date AS "startDate", end_date AS "endDate", created_at AS "createdAt"
-     FROM events WHERE id = $1`,
+    `SELECT e.id, e.human_id AS "humanId", e.organisation_id AS "organisationId",
+            e.title, e.description, e.latitude, e.longitude,
+            e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
+            o.name AS "organisationName"
+     FROM events e LEFT JOIN organisations o ON o.id = e.organisation_id
+     WHERE e.id = $1`,
     [params.id],
   );
 
@@ -850,9 +940,11 @@ async function load(){
   const list=document.getElementById('list');
   for(const ev of j.data){
     const d=document.createElement('div');
-    d.innerHTML='<a href="/view/event/'+ev.id+'"><b>'+esc(ev.title)+'</b></a><br>'
-      +esc(ev.description)+'<br>'
-      +'<small>'+new Date(ev.startDate).toLocaleString()+' - '+new Date(ev.endDate).toLocaleString()+'</small><hr>';
+    let evHtml='<a href="/view/event/'+ev.id+'"><b>'+esc(ev.title)+'</b></a><br>'
+      +esc(ev.description)+'<br>';
+    if(ev.organisationName)evHtml+='<small>Organisation: <a href="/view/organisation/'+ev.organisationId+'">'+esc(ev.organisationName)+'</a></small><br>';
+    evHtml+='<small>'+new Date(ev.startDate).toLocaleString()+' - '+new Date(ev.endDate).toLocaleString()+'</small><hr>';
+    d.innerHTML=evHtml;
     list.appendChild(d);
   }
   if(page*limit>=j.total){done=true;document.getElementById('end').style.display='block'}
@@ -938,7 +1030,7 @@ try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
     +'<p>Start: '+new Date(ev.startDate).toLocaleString()+'</p>'
     +'<p>End: '+new Date(ev.endDate).toLocaleString()+'</p>'
     +'<p>Created: '+new Date(ev.createdAt).toLocaleString()+'</p>';
-  if(ev.organisationId)html+='<p>Organisation: <a href="/view/organisation/'+ev.organisationId+'">'+ev.organisationId+'</a></p>';
+  if(ev.organisationId)html+='<p>Organisation: <a href="/view/organisation/'+ev.organisationId+'">'+esc(ev.organisationName||ev.organisationId)+'</a></p>';
   let canEdit=me.role==='admin'||me.sub===ev.humanId;
   if(!canEdit&&ev.organisationId){
     const cr=await fetch('/organisations/'+ev.organisationId+'/organisers/check?humanId='+me.sub);
@@ -969,18 +1061,16 @@ const t=localStorage.getItem('accessToken');
 let me={};
 try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
 (async()=>{
-  const r=await fetch('/organisations/'+id);
+  const r=await fetch('/organisations/'+id,{headers:{'Authorization':'Bearer '+t}});
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const o=await r.json();
   document.getElementById('title').textContent=o.name;
   let html='<p>Name: '+esc(o.name)+'</p>'
     +'<p>Created: '+new Date(o.createdAt).toLocaleString()+'</p>';
-  let canEdit=me.role==='admin';
-  if(!canEdit){
-    const cr=await fetch('/organisations/'+id+'/organisers/check?humanId='+me.sub);
-    if(cr.ok){const cj=await cr.json();canEdit=cj.isOrganiser}
+  if(o.isOrganiser){
+    html+='<br><a href="/edit/organisation/'+o.id+'">[edit]</a>';
+    html+=' <a href="/manage/organisation/'+o.id+'/organisers">[manage organisers]</a>';
   }
-  if(canEdit)html+='<br><a href="/edit/organisation/'+o.id+'">[edit]</a>';
   document.getElementById('detail').innerHTML=html;
 })();
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
@@ -1133,6 +1223,94 @@ document.getElementById('f').onsubmit=async e=>{
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
   window.location.href='/view/organisation/'+orgId;
 };
+</script>
+</body></html>`);
+});
+
+app.get('/manage/organisation/:id/organisers', (_req: Request, res: Response) => {
+  res.type('html').send(`<!DOCTYPE html>
+<html><head><title>Manage organisers</title>${PAGE_HEAD}</head><body>
+<div class="c">
+<h1 id="title">Manage organisers</h1>
+${APP_NAV}
+<hr>
+<p><a id="back" href="#">&larr; Back to organisation</a></p>
+<br>
+<b>Add organiser</b><br>
+<input type="text" id="humanSearch" placeholder="Search by nickname..." autocomplete="off">
+<div class="dropdown" id="humanDrop"></div>
+<br>
+<b>Current organisers</b>
+<div id="list"></div>
+<p id="err"></p>
+</div>
+<script>
+if(!localStorage.getItem('accessToken'))window.location.href='/login';
+const parts=window.location.pathname.split('/');
+const orgId=parts[3];
+const t=localStorage.getItem('accessToken');
+let me={};
+try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
+document.getElementById('back').href='/view/organisation/'+orgId;
+let debounce;
+document.getElementById('humanSearch').oninput=function(){
+  clearTimeout(debounce);
+  const v=this.value;
+  const drop=document.getElementById('humanDrop');
+  if(v.length<2){drop.style.display='none';return}
+  debounce=setTimeout(async()=>{
+    const r=await fetch('/humans?nickname='+encodeURIComponent(v));
+    if(!r.ok)return;
+    const humans=await r.json();
+    drop.innerHTML='';
+    if(humans.length===0){drop.style.display='none';return}
+    for(const h of humans){
+      const d=document.createElement('div');
+      d.textContent=h.nickname;
+      d.onclick=async()=>{
+        drop.style.display='none';
+        document.getElementById('humanSearch').value='';
+        const r=await fetch('/organisations/'+orgId+'/organisers',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({humanId:h.id})});
+        if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+        document.getElementById('err').textContent='';
+        loadOrganisers();
+      };
+      drop.appendChild(d);
+    }
+    drop.style.display='block';
+  },300);
+};
+document.addEventListener('click',e=>{if(!e.target.closest('#humanSearch,#humanDrop'))document.getElementById('humanDrop').style.display='none'});
+async function loadOrganisers(){
+  const r=await fetch('/organisations/'+orgId+'/organisers',{headers:{'Authorization':'Bearer '+t}});
+  if(!r.ok){document.getElementById('err').textContent='Could not load organisers';return}
+  const organisers=await r.json();
+  const list=document.getElementById('list');
+  list.innerHTML='';
+  const firstId=organisers.length>0?organisers[0].humanId:null;
+  for(const o of organisers){
+    const d=document.createElement('div');
+    let html=esc(o.nickname)+' <small>('+o.humanId.slice(0,8)+'...)</small>';
+    const isFirst=o.humanId===firstId;
+    const canRemove=me.role==='admin'||(o.humanId===me.sub)||(!isFirst);
+    if(canRemove)html+=' <a href="#" class="rm" data-hid="'+o.humanId+'">[remove]</a>';
+    if(isFirst)html+=' <small>(first organiser)</small>';
+    d.innerHTML=html+'<hr>';
+    list.appendChild(d);
+  }
+  list.querySelectorAll('.rm').forEach(a=>{
+    a.onclick=async e=>{
+      e.preventDefault();
+      const hid=a.dataset.hid;
+      const r=await fetch('/organisations/'+orgId+'/organisers/'+hid,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
+      if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+      document.getElementById('err').textContent='';
+      loadOrganisers();
+    };
+  });
+}
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+loadOrganisers();
 </script>
 </body></html>`);
 });
