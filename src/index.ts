@@ -465,7 +465,7 @@ app.get(
       ]),
       pool.query(
         `SELECT e.id, e.human_id AS "humanId", e.organisation_id AS "organisationId",
-                e.title, e.description,
+                e.place_id AS "placeId", e.title, e.description,
                 p.latitude, p.longitude, p.name AS "placeName", p.address AS "placeAddress",
                 e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
                 o.name AS "organisationName"
@@ -499,7 +499,7 @@ app.get('/places/:placeId/events', async (req: Request, res: Response) => {
     pool.query('SELECT COUNT(*) FROM events WHERE place_id = $1', [placeId]),
     pool.query(
       `SELECT e.id, e.human_id AS "humanId", e.organisation_id AS "organisationId",
-                e.title, e.description,
+                e.place_id AS "placeId", e.title, e.description,
                 p.latitude, p.longitude, p.name AS "placeName", p.address AS "placeAddress",
                 e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
                 o.name AS "organisationName"
@@ -1206,7 +1206,7 @@ app.get('/events', async (req: Request, res: Response) => {
     pool.query('SELECT COUNT(*) FROM events WHERE start_date >= CURRENT_DATE'),
     pool.query(
       `SELECT e.id, e.human_id AS "humanId", e.organisation_id AS "organisationId",
-              e.title, e.description,
+              e.place_id AS "placeId", e.title, e.description,
               p.latitude, p.longitude, p.name AS "placeName", p.address AS "placeAddress",
               e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
               o.name AS "organisationName"
@@ -1255,7 +1255,7 @@ app.get('/events/area', async (req: Request, res: Response) => {
 
   const rows = await pool.query(
     `SELECT e.id, e.human_id AS "humanId", e.organisation_id AS "organisationId",
-            e.title, e.description,
+            e.place_id AS "placeId", e.title, e.description,
             p.latitude, p.longitude, p.name AS "placeName", p.address AS "placeAddress",
             e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
             o.name AS "organisationName"
@@ -1711,8 +1711,7 @@ async function load(){
   const list=document.getElementById('list');
   for(const o of j.data){
     const dv=document.createElement('div');
-    let oHtml='<a href="/view/organisation/'+o.id+'"><b>'+esc(o.name)+'</b></a><br>'
-      +'<small>Created: '+new Date(o.createdAt).toLocaleString()+'</small>';
+    let oHtml='<a href="/view/organisation/'+o.id+'"><b>'+esc(o.name)+'</b></a>';
     if(me.role==='admin')oHtml+=' <a href="/edit/organisation/'+o.id+'">[edit]</a> <a href="#" class="delOrg" data-id="'+o.id+'">[delete]</a>';
     oHtml+='<hr>';
     dv.innerHTML=oHtml;
@@ -1815,8 +1814,7 @@ try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const o=await r.json();
   document.getElementById('title').textContent=o.name;
-  let html='<p>Name: '+esc(o.name)+'</p>'
-    +'<p>Created: '+new Date(o.createdAt).toLocaleString()+'</p>';
+  let html='<p>Name: '+esc(o.name)+'</p>';
   if(me.role==='admin'){
     html+='<br><a href="/edit/organisation/'+o.id+'">[edit]</a>';
     html+=' <a href="#" id="deleteBtn">[delete]</a>';
@@ -1905,8 +1903,7 @@ const id=window.location.pathname.split('/').pop();
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const p=await r.json();
   document.getElementById('title').textContent=p.name;
-  let html='<p>Address: '+esc(p.address)+'</p>'
-    +'<p>City: '+esc(p.cityName)+', '+esc(p.countryName)+'</p>'
+  let html='<p>'+esc(p.countryName)+', '+esc(p.cityName)+', '+esc(p.address)+'</p>'
     +'<p>Coordinates: '+p.latitude+', '+p.longitude+'</p>';
   document.getElementById('detail').innerHTML=html;
   document.getElementById('eventsSection').style.display='block';
