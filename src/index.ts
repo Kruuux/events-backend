@@ -297,7 +297,7 @@ app.post('/organisations', async (req: Request, res: Response) => {
     return;
   }
   if (payload.role !== 'admin') {
-    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
     return;
   }
 
@@ -354,7 +354,7 @@ app.get('/organisations', async (req: Request, res: Response) => {
 
   const total = Number(countResult.rows[0]!.count);
 
-  res.status(200).json({ data: rows.rows, total, page, limit });
+  res.status(200).json({ data: rows.rows, count: total });
 });
 
 app.get('/organisations/:id', async (req: Request, res: Response) => {
@@ -394,7 +394,7 @@ app.put('/organisations/:id', async (req: Request, res: Response) => {
     return;
   }
   if (payload.role !== 'admin') {
-    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
     return;
   }
 
@@ -431,7 +431,7 @@ app.delete('/organisations/:id', async (req: Request, res: Response) => {
     return;
   }
   if (payload.role !== 'admin') {
-    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
     return;
   }
 
@@ -482,7 +482,7 @@ app.get(
     ]);
 
     const total = Number(countResult.rows[0]!.count);
-    res.status(200).json({ data: rows.rows, total, page, limit });
+    res.status(200).json({ data: rows.rows, count: total });
   },
 );
 
@@ -516,7 +516,7 @@ app.get('/places/:placeId/events', async (req: Request, res: Response) => {
   ]);
 
   const total = Number(countResult.rows[0]!.count);
-  res.status(200).json({ data: rows.rows, total, page, limit });
+  res.status(200).json({ data: rows.rows, count: total });
 });
 
 // --- countries ---
@@ -537,7 +537,7 @@ app.post('/countries', async (req: Request, res: Response) => {
     return;
   }
   if (payload.role !== 'admin') {
-    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
     return;
   }
 
@@ -593,7 +593,7 @@ app.get('/countries', async (req: Request, res: Response) => {
   ]);
 
   const total = Number(countResult.rows[0]!.count);
-  res.status(200).json({ data: rows.rows, total, page, limit });
+  res.status(200).json({ data: rows.rows, count: total });
 });
 
 app.get('/countries/:id', async (req: Request, res: Response) => {
@@ -628,7 +628,7 @@ app.put('/countries/:id', async (req: Request, res: Response) => {
     return;
   }
   if (payload.role !== 'admin') {
-    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
     return;
   }
 
@@ -665,7 +665,7 @@ app.delete('/countries/:id', async (req: Request, res: Response) => {
     return;
   }
   if (payload.role !== 'admin') {
-    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
     return;
   }
 
@@ -713,7 +713,7 @@ app.post('/cities', async (req: Request, res: Response) => {
     return;
   }
   if (payload.role !== 'admin') {
-    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
     return;
   }
 
@@ -803,7 +803,7 @@ app.get('/cities', async (req: Request, res: Response) => {
   ]);
 
   const total = Number(countResult.rows[0]!.count);
-  res.status(200).json({ data: rows.rows, total, page, limit });
+  res.status(200).json({ data: rows.rows, count: total });
 });
 
 app.get('/cities/:id', async (req: Request, res: Response) => {
@@ -836,7 +836,7 @@ app.put('/cities/:id', async (req: Request, res: Response) => {
     return;
   }
   if (payload.role !== 'admin') {
-    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
     return;
   }
 
@@ -873,7 +873,7 @@ app.delete('/cities/:id', async (req: Request, res: Response) => {
     return;
   }
   if (payload.role !== 'admin') {
-    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
     return;
   }
 
@@ -927,7 +927,7 @@ app.post('/places', async (req: Request, res: Response) => {
     return;
   }
   if (payload.role !== 'admin') {
-    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
     return;
   }
 
@@ -1020,7 +1020,7 @@ app.get('/places', async (req: Request, res: Response) => {
   ]);
 
   const total = Number(countResult.rows[0]!.count);
-  res.status(200).json({ data: rows.rows, total, page, limit });
+  res.status(200).json({ data: rows.rows, count: total });
 });
 
 app.get('/places/:id', async (req: Request, res: Response) => {
@@ -1056,7 +1056,7 @@ app.put('/places/:id', async (req: Request, res: Response) => {
     return;
   }
   if (payload.role !== 'admin') {
-    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
     return;
   }
 
@@ -1100,7 +1100,7 @@ app.delete('/places/:id', async (req: Request, res: Response) => {
     return;
   }
   if (payload.role !== 'admin') {
-    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
     return;
   }
 
@@ -1146,7 +1146,7 @@ app.post('/events', async (req: Request, res: Response) => {
     return;
   }
   if (payload.role !== 'admin') {
-    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
     return;
   }
 
@@ -1221,7 +1221,7 @@ app.get('/events', async (req: Request, res: Response) => {
 
   const total = Number(countResult.rows[0]!.count);
 
-  res.status(200).json({ data: rows.rows, total, page, limit });
+  res.status(200).json({ data: rows.rows, count: total });
 });
 
 const CoordPipe = (min: number, max: number) =>
@@ -1317,7 +1317,7 @@ app.put('/events/:id', async (req: Request, res: Response) => {
     return;
   }
   if (payload.role !== 'admin') {
-    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
     return;
   }
 
@@ -1378,7 +1378,7 @@ app.delete('/events/:id', async (req: Request, res: Response) => {
     return;
   }
   if (payload.role !== 'admin') {
-    res.status(403).json({ code: 'ADMIN_ONLY_EXCEPTION' });
+    res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
     return;
   }
 
@@ -1577,7 +1577,7 @@ async function load(){
       a.closest('div').remove();
     };
   });
-  if(page*limit>=j.total){done=true;document.getElementById('end').style.display='block'}
+  if(page*limit>=j.count){done=true;document.getElementById('end').style.display='block'}
   else{page++}
   loading=false;
   document.getElementById('loading').style.display=done?'none':'block';
@@ -1727,7 +1727,7 @@ async function load(){
       a.closest('div').remove();
     };
   });
-  if(page*limit>=j.total){done=true;document.getElementById('end').style.display='block'}
+  if(page*limit>=j.count){done=true;document.getElementById('end').style.display='block'}
   else{page++}
   loading=false;
   document.getElementById('loading').style.display=done?'none':'block';
@@ -1867,7 +1867,7 @@ async function loadEvents(){
     d.innerHTML=evHtml;
     list.appendChild(d);
   }
-  if(evPage*evLimit>=j.total){evDone=true;document.getElementById('end').style.display='block'}
+  if(evPage*evLimit>=j.count){evDone=true;document.getElementById('end').style.display='block'}
   else{evPage++}
   evLoading=false;
   document.getElementById('loading').style.display=evDone?'none':'block';
@@ -1903,7 +1903,7 @@ const id=window.location.pathname.split('/').pop();
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const p=await r.json();
   document.getElementById('title').textContent=p.name;
-  let html='<p>'+esc(p.countryName)+', '+esc(p.cityName)+', '+esc(p.address)+'</p>'
+  let html='<p>Address: '+esc(p.countryName)+', '+esc(p.cityName)+', '+esc(p.address)+'</p>'
     +'<p>Coordinates: '+p.latitude+', '+p.longitude+'</p>';
   document.getElementById('detail').innerHTML=html;
   document.getElementById('eventsSection').style.display='block';
@@ -1946,7 +1946,7 @@ async function loadEvents(){
     d.innerHTML=evHtml;
     list.appendChild(d);
   }
-  if(evPage*evLimit>=j.total){evDone=true;document.getElementById('end').style.display='block'}
+  if(evPage*evLimit>=j.count){evDone=true;document.getElementById('end').style.display='block'}
   else{evPage++}
   evLoading=false;
   document.getElementById('loading').style.display=evDone?'none':'block';

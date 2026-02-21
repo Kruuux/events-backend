@@ -195,7 +195,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/AdminOnly"
+          $ref: "#/components/responses/Forbidden"
         "409":
           description: Name already taken
           content:
@@ -236,11 +236,7 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/Organisation"
-                  total:
-                    type: integer
-                  page:
-                    type: integer
-                  limit:
+                  count:
                     type: integer
         "400":
           $ref: "#/components/responses/ValidationException"
@@ -302,7 +298,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/AdminOnly"
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -333,7 +329,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/AdminOnly"
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -366,7 +362,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/AdminOnly"
+          $ref: "#/components/responses/Forbidden"
         "409":
           description: Name already taken
           content:
@@ -407,11 +403,7 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/Country"
-                  total:
-                    type: integer
-                  page:
-                    type: integer
-                  limit:
+                  count:
                     type: integer
         "400":
           $ref: "#/components/responses/ValidationException"
@@ -473,7 +465,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/AdminOnly"
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -504,7 +496,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/AdminOnly"
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -548,7 +540,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/AdminOnly"
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: Country not found
           content:
@@ -595,11 +587,7 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/City"
-                  total:
-                    type: integer
-                  page:
-                    type: integer
-                  limit:
+                  count:
                     type: integer
         "400":
           $ref: "#/components/responses/ValidationException"
@@ -664,7 +652,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/AdminOnly"
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -687,7 +675,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/AdminOnly"
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -742,7 +730,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/AdminOnly"
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: City not found
           content:
@@ -789,11 +777,7 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/Place"
-                  total:
-                    type: integer
-                  page:
-                    type: integer
-                  limit:
+                  count:
                     type: integer
         "400":
           $ref: "#/components/responses/ValidationException"
@@ -869,7 +853,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/AdminOnly"
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -892,7 +876,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/AdminOnly"
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -948,7 +932,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/AdminOnly"
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: Place or organisation not found
           content:
@@ -984,11 +968,7 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/Event"
-                  total:
-                    type: integer
-                  page:
-                    type: integer
-                  limit:
+                  count:
                     type: integer
         "400":
           $ref: "#/components/responses/ValidationException"
@@ -1126,7 +1106,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/AdminOnly"
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: Event, place, or organisation not found
           content:
@@ -1155,7 +1135,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/AdminOnly"
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -1192,11 +1172,7 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/Event"
-                  total:
-                    type: integer
-                  page:
-                    type: integer
-                  limit:
+                  count:
                     type: integer
         "400":
           $ref: "#/components/responses/ValidationException"
@@ -1382,14 +1358,14 @@ components:
           example:
             code: UNAUTHORIZED_EXCEPTION
 
-    AdminOnly:
+    Forbidden:
       description: Admin only
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorCode"
           example:
-            code: ADMIN_ONLY_EXCEPTION
+            code: FORBIDDEN_EXCEPTION
 
     NotFound:
       description: Resource not found
