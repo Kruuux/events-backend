@@ -1729,6 +1729,18 @@ function updateBtn(){
 updateBtn();
 function showDrop(cities){
   cityDrop.innerHTML='';
+  var all=document.createElement('div');
+  all.textContent='All cities';
+  all.onmousedown=function(e){e.preventDefault()};
+  all.onclick=function(){
+    localStorage.removeItem('selectedCityId');
+    localStorage.removeItem('selectedCityName');
+    updateBtn();
+    cityInputWrap.style.display='none';cityBtn.style.display='';
+    cityInput.value='';cityDrop.style.display='none';
+    if(window.onCityChange)window.onCityChange();
+  };
+  cityDrop.appendChild(all);
   for(var i=0;i<cities.length;i++){
     var d=document.createElement('div');
     d.textContent=cities[i].name;
@@ -1745,7 +1757,7 @@ function showDrop(cities){
     };
     cityDrop.appendChild(d);
   }
-  cityDrop.style.display=cities.length?'block':'none';
+  cityDrop.style.display='block';
 }
 function fetchCities(name){
   var url='/api/v1/cities?limit=20';
