@@ -2548,7 +2548,7 @@ app.delete('/api/v1/events/:id', async (req: Request, res: Response) => {
 
 // --- pages ---
 
-const PAGE_STYLE = `*{margin:0;padding:0;box-sizing:border-box}body{background:#fff;color:#000;font-family:monospace;font-size:16px}.c{max-width:1000px;margin:0 auto;padding:24px 16px}a{color:#000}nav{margin:8px 0 16px}nav .btn{margin:2px 0}#cityBtn{white-space:nowrap}hr{border:none;border-top:1px solid #000;margin:16px 0}input,select{border:1px solid #000;padding:6px;margin:4px 0 12px;width:100%;font-family:monospace;font-size:16px}button{border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer}#err{font-weight:bold;margin-top:12px}.dropdown{border:1px solid #000;max-height:150px;overflow-y:auto;display:none}.dropdown div{padding:4px 6px;cursor:pointer}.dropdown div:hover{background:#000;color:#fff}.bc{margin:8px 0;font-size:14px}.searchRow{display:flex;align-items:center;gap:12px;margin-bottom:12px}.searchRow input{flex:1;margin:0}.searchRow .btn{white-space:nowrap}#cityPicker{position:relative}#cityPicker input{width:180px;margin:0}#cityPicker .dropdown{position:absolute;right:0;width:180px;background:#fff;z-index:10}#langSelect{border:1px solid #000;padding:6px;font-family:monospace;font-size:14px;margin:0;width:auto}.btn{display:inline-block;border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer;text-decoration:none;margin-bottom:4px}.btn:hover{background:#000;color:#fff}.tag{display:inline-block;border:1px solid #000;padding:2px 8px;margin:2px;font-size:14px}.tag-chip{display:inline-block;border:1px solid #000;padding:2px 8px;margin:2px;font-size:14px;cursor:pointer}.tag-chip:hover{background:#000;color:#fff}#tagChips{margin:4px 0}.tw-entry{border:1px solid #000;padding:8px;margin:4px 0}.tw-remove{border:1px solid #000;background:#fff;padding:2px 8px;cursor:pointer;font-family:monospace;font-size:14px}.tw-remove:hover{background:#000;color:#fff}`;
+const PAGE_STYLE = `*{margin:0;padding:0;box-sizing:border-box}body{background:#fff;color:#000;font-family:monospace;font-size:16px}.c{max-width:1000px;margin:0 auto;padding:24px 16px}a{color:#000}nav{margin:8px 0 16px}nav .btn{margin:2px 0}#cityBtn{white-space:nowrap}hr{border:none;border-top:1px solid #000;margin:16px 0}input,select{border:1px solid #000;padding:6px;margin:4px 0 12px;width:100%;font-family:monospace;font-size:16px}button{border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer}#err{font-weight:bold;margin-top:12px}.dropdown{border:1px solid #000;max-height:150px;overflow-y:auto;display:none}.dropdown div{padding:4px 6px;cursor:pointer}.dropdown div:hover{background:#000;color:#fff}.bc{margin:8px 0;font-size:14px}.searchRow{display:flex;align-items:center;gap:12px;margin-bottom:12px}.searchRow input{flex:1;margin:0}.searchRow .btn{white-space:nowrap}#cityPicker{position:relative}#cityPicker input{width:180px;margin:0}#cityPicker .dropdown{position:absolute;right:0;width:180px;background:#fff;z-index:10}#langSelect{border:1px solid #000;padding:6px;font-family:monospace;font-size:14px;margin:0;width:auto}.btn{display:inline-block;border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer;text-decoration:none;margin-bottom:4px}.btn:hover{background:#000;color:#fff}.tag{display:inline-block;border:1px solid #000;padding:2px 8px;margin:2px;font-size:14px}.tag-chip{display:inline-block;border:1px solid #000;padding:2px 8px;margin:2px;font-size:14px;cursor:pointer}.tag-chip:hover{background:#000;color:#fff}#tagChips{margin:4px 0}.tw-entry{border:1px solid #000;padding:8px;margin:4px 0}.tw-remove{border:1px solid #000;background:#fff;padding:2px 8px;cursor:pointer;font-family:monospace;font-size:14px}.tw-remove:hover{background:#000;color:#fff}.fav-btn{width:36px;text-align:center;padding-left:0;padding-right:0}`;
 const PAGE_HEAD = `<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${PAGE_STYLE}</style>`;
 const NAV_SCRIPT = `<script>
 (function(){const t=localStorage.getItem('accessToken');if(!t)return;
@@ -3067,7 +3067,7 @@ async function load(){
   for(const o of j.data){
     const dv=document.createElement('div');
     let oHtml='<a href="/view/organisation/'+o.id+'"><b>'+esc(o.name)+'</b></a>';
-    oHtml+=' <a href="#" class="btn favOrg" style="float:right" data-id="'+o.id+'" data-fav="'+o.isFavourite+'">'+(o.isFavourite?'Remove from favourites':'Add to favourites')+'</a>';
+    oHtml+=' <a href="#" class="btn fav-btn favOrg" style="float:right" data-id="'+o.id+'" data-fav="'+o.isFavourite+'">'+(o.isFavourite?'X':'<3')+'</a>';
     if(me.role==='admin')oHtml+='<div style="margin-top:8px"><a href="/edit/organisation/'+o.id+'" class="btn">edit</a> <a href="#" class="btn delOrg" data-id="'+o.id+'">delete</a></div>';
     oHtml+='<hr>';
     dv.innerHTML=oHtml;
@@ -3088,10 +3088,10 @@ async function load(){
       const isFav=a.dataset.fav==='true';
       if(isFav){
         await fetch('/api/v1/favourite-organisations/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
-        a.dataset.fav='false';a.textContent='Add to favourites';
+        a.dataset.fav='false';a.textContent='<3';
       }else{
         await fetch('/api/v1/favourite-organisations',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify({organisationId:a.dataset.id})});
-        a.dataset.fav='true';a.textContent='Remove from favourites';
+        a.dataset.fav='true';a.textContent='X';
       }
     };
   });
@@ -3841,7 +3841,7 @@ async function load(){
   for(const p of j.data){
     const d=document.createElement('div');
     let pHtml='<a href="/view/place/'+p.id+'"><b>'+esc(p.name)+'</b></a>'
-      +' <a href="#" class="btn favPlace" style="float:right" data-id="'+p.id+'" data-fav="'+p.isFavourite+'">'+(p.isFavourite?'Remove from favourites':'Add to favourites')+'</a>'
+      +' <a href="#" class="btn fav-btn favPlace" style="float:right" data-id="'+p.id+'" data-fav="'+p.isFavourite+'">'+(p.isFavourite?'X':'<3')+'</a>'
       +'<br>'+esc(p.address)+' <small>('+esc(p.cityName)+', '+esc(p.countryName)+')</small><br>'
       +'<small>Lat: '+p.latitude+', Lng: '+p.longitude+'</small>';
     if(me.role==='admin'){
@@ -3880,10 +3880,10 @@ async function load(){
       const isFav=a.dataset.fav==='true';
       if(isFav){
         await fetch('/api/v1/favourite-places/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
-        a.dataset.fav='false';a.textContent='Add to favourites';
+        a.dataset.fav='false';a.textContent='<3';
       }else{
         await fetch('/api/v1/favourite-places',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify({placeId:a.dataset.id})});
-        a.dataset.fav='true';a.textContent='Remove from favourites';
+        a.dataset.fav='true';a.textContent='X';
       }
     };
   });
