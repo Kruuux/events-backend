@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Server } from 'node:http';
@@ -157,16 +158,24 @@ describe('POST /api/v1/join', () => {
   });
 
   it('returns 409 when email is already taken', async () => {
-    await fetch(`${baseUrl}/api/v1/join`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        nickname: 'dupemail1',
-        email: 'join-dupe-email@test.com',
-        password: 'password123',
-        role: 'member',
-      }),
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = await new Promise<string>((resolve, reject) => {
+      crypto.scrypt('password123', salt, 64, (err, derivedKey) => {
+        if (err) reject(err);
+        else resolve(derivedKey.toString('hex'));
+      });
     });
+    await pool.query(
+      'INSERT INTO humans (id, nickname, email, password_hash, salt, role) VALUES ($1, $2, $3, $4, $5, $6)',
+      [
+        crypto.randomUUID(),
+        'dupemail1',
+        'join-dupe-email@test.com',
+        hash,
+        salt,
+        'member',
+      ],
+    );
 
     const res = await fetch(`${baseUrl}/api/v1/join`, {
       method: 'POST',
@@ -185,16 +194,24 @@ describe('POST /api/v1/join', () => {
   });
 
   it('returns 409 when nickname is already taken', async () => {
-    await fetch(`${baseUrl}/api/v1/join`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        nickname: 'dupnick',
-        email: 'join-dupe-nick1@test.com',
-        password: 'password123',
-        role: 'member',
-      }),
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = await new Promise<string>((resolve, reject) => {
+      crypto.scrypt('password123', salt, 64, (err, derivedKey) => {
+        if (err) reject(err);
+        else resolve(derivedKey.toString('hex'));
+      });
     });
+    await pool.query(
+      'INSERT INTO humans (id, nickname, email, password_hash, salt, role) VALUES ($1, $2, $3, $4, $5, $6)',
+      [
+        crypto.randomUUID(),
+        'dupnick',
+        'join-dupe-nick1@test.com',
+        hash,
+        salt,
+        'member',
+      ],
+    );
 
     const res = await fetch(`${baseUrl}/api/v1/join`, {
       method: 'POST',
@@ -215,16 +232,24 @@ describe('POST /api/v1/join', () => {
 
 describe('POST /api/v1/enter', () => {
   it('returns 200 with accessToken and refreshToken for valid credentials', async () => {
-    await fetch(`${baseUrl}/api/v1/join`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        nickname: 'enterok',
-        email: 'enter-ok@test.com',
-        password: 'password123',
-        role: 'member',
-      }),
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = await new Promise<string>((resolve, reject) => {
+      crypto.scrypt('password123', salt, 64, (err, derivedKey) => {
+        if (err) reject(err);
+        else resolve(derivedKey.toString('hex'));
+      });
     });
+    await pool.query(
+      'INSERT INTO humans (id, nickname, email, password_hash, salt, role) VALUES ($1, $2, $3, $4, $5, $6)',
+      [
+        crypto.randomUUID(),
+        'enterok',
+        'enter-ok@test.com',
+        hash,
+        salt,
+        'member',
+      ],
+    );
 
     const res = await fetch(`${baseUrl}/api/v1/enter`, {
       method: 'POST',
@@ -284,16 +309,24 @@ describe('POST /api/v1/enter', () => {
   });
 
   it('returns 401 when password is wrong', async () => {
-    await fetch(`${baseUrl}/api/v1/join`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        nickname: 'enterwrongpw',
-        email: 'enter-wrong-pw@test.com',
-        password: 'password123',
-        role: 'member',
-      }),
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = await new Promise<string>((resolve, reject) => {
+      crypto.scrypt('password123', salt, 64, (err, derivedKey) => {
+        if (err) reject(err);
+        else resolve(derivedKey.toString('hex'));
+      });
     });
+    await pool.query(
+      'INSERT INTO humans (id, nickname, email, password_hash, salt, role) VALUES ($1, $2, $3, $4, $5, $6)',
+      [
+        crypto.randomUUID(),
+        'enterwrongpw',
+        'enter-wrong-pw@test.com',
+        hash,
+        salt,
+        'member',
+      ],
+    );
 
     const res = await fetch(`${baseUrl}/api/v1/enter`, {
       method: 'POST',
