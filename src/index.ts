@@ -2548,7 +2548,7 @@ app.delete('/api/v1/events/:id', async (req: Request, res: Response) => {
 
 // --- pages ---
 
-const PAGE_STYLE = `*{margin:0;padding:0;box-sizing:border-box}body{background:#fff;color:#000;font-family:monospace;font-size:16px}.c{max-width:1000px;margin:0 auto;padding:24px 16px}a{color:#000}nav{margin:8px 0 16px}nav .btn{margin:2px 0}#cityBtn{white-space:nowrap}hr{border:none;border-top:1px solid #000;margin:16px 0}input,select{border:1px solid #000;padding:6px;margin:4px 0 12px;width:100%;font-family:monospace;font-size:16px}button{border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer}#err{font-weight:bold;margin-top:12px}.dropdown{border:1px solid #000;max-height:150px;overflow-y:auto;display:none}.dropdown div{padding:4px 6px;cursor:pointer}.dropdown div:hover{background:#000;color:#fff}.bc{margin:8px 0;font-size:14px}.searchRow{display:flex;align-items:center;gap:12px;margin-bottom:12px}.searchRow input{flex:1;margin:0}.searchRow .btn{white-space:nowrap}#cityPicker{position:relative}#cityPicker input{width:180px;margin:0}#cityPicker .dropdown{position:absolute;right:0;width:180px;background:#fff;z-index:10}#langSelect{border:1px solid #000;padding:6px;font-family:monospace;font-size:14px;margin:0;width:auto}.btn{display:inline-block;border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer;text-decoration:none;margin-bottom:4px}.btn:hover{background:#000;color:#fff}.tag{display:inline-block;border:1px solid #000;padding:2px 8px;margin:2px;font-size:14px}.tag-chip{display:inline-block;border:1px solid #000;padding:2px 8px;margin:2px;font-size:14px;cursor:pointer}.tag-chip:hover{background:#000;color:#fff}#tagChips{margin:4px 0}.tw-entry{border:1px solid #000;padding:8px;margin:4px 0}.tw-remove{border:1px solid #000;background:#fff;padding:2px 8px;cursor:pointer;font-family:monospace;font-size:14px}.tw-remove:hover{background:#000;color:#fff}.tw-count{font-size:14px;margin:4px 0}`;
+const PAGE_STYLE = `*{margin:0;padding:0;box-sizing:border-box}body{background:#fff;color:#000;font-family:monospace;font-size:16px}.c{max-width:1000px;margin:0 auto;padding:24px 16px}a{color:#000}nav{margin:8px 0 16px}nav .btn{margin:2px 0}#cityBtn{white-space:nowrap}hr{border:none;border-top:1px solid #000;margin:16px 0}input,select{border:1px solid #000;padding:6px;margin:4px 0 12px;width:100%;font-family:monospace;font-size:16px}button{border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer}#err{font-weight:bold;margin-top:12px}.dropdown{border:1px solid #000;max-height:150px;overflow-y:auto;display:none}.dropdown div{padding:4px 6px;cursor:pointer}.dropdown div:hover{background:#000;color:#fff}.bc{margin:8px 0;font-size:14px}.searchRow{display:flex;align-items:center;gap:12px;margin-bottom:12px}.searchRow input{flex:1;margin:0}.searchRow .btn{white-space:nowrap}#cityPicker{position:relative}#cityPicker input{width:180px;margin:0}#cityPicker .dropdown{position:absolute;right:0;width:180px;background:#fff;z-index:10}#langSelect{border:1px solid #000;padding:6px;font-family:monospace;font-size:14px;margin:0;width:auto}.btn{display:inline-block;border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer;text-decoration:none;margin-bottom:4px}.btn:hover{background:#000;color:#fff}.tag{display:inline-block;border:1px solid #000;padding:2px 8px;margin:2px;font-size:14px}.tag-chip{display:inline-block;border:1px solid #000;padding:2px 8px;margin:2px;font-size:14px;cursor:pointer}.tag-chip:hover{background:#000;color:#fff}#tagChips{margin:4px 0}.tw-entry{border:1px solid #000;padding:8px;margin:4px 0}.tw-remove{border:1px solid #000;background:#fff;padding:2px 8px;cursor:pointer;font-family:monospace;font-size:14px}.tw-remove:hover{background:#000;color:#fff}`;
 const PAGE_HEAD = `<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${PAGE_STYLE}</style>`;
 const NAV_SCRIPT = `<script>
 (function(){const t=localStorage.getItem('accessToken');if(!t)return;
@@ -2756,19 +2756,17 @@ document.getElementById('tagSearch').oninput=function(){
 document.addEventListener('click',e=>{if(!e.target.closest('#tagSearch,#tagDrop'))document.getElementById('tagDrop').style.display='none'});`;
 
 const TRANSLATION_WIDGET_SCRIPT = `
-function TranslationWidget(containerId,prefix,mode,allLanguages,max){
-var self=this;self.entries=[];self.max=max||5;self.allLanguages=allLanguages;self.mode=mode;self.prefix=prefix;
+function TranslationWidget(containerId,prefix,mode,allLanguages){
+var self=this;self.entries=[];self.allLanguages=allLanguages;self.mode=mode;self.prefix=prefix;
 var container=document.getElementById(containerId);container.innerHTML='';
 var entriesDiv=document.createElement('div');entriesDiv.id=prefix+'_entries';container.appendChild(entriesDiv);
-var countDiv=document.createElement('div');countDiv.className='tw-count';container.appendChild(countDiv);
 var searchArea=document.createElement('div');searchArea.id=prefix+'_searchArea';searchArea.style.position='relative';
 var searchInput=document.createElement('input');searchInput.type='text';searchInput.placeholder='Search language...';searchInput.autocomplete='off';
 searchArea.appendChild(searchInput);
 var dropdown=document.createElement('div');dropdown.className='dropdown';searchArea.appendChild(dropdown);
 container.appendChild(searchArea);
-function updateCount(){
-countDiv.textContent=self.entries.length+'/'+self.max+' translations';
-searchArea.style.display=self.entries.length>=self.max?'none':'';
+function updateSearch(){
+searchArea.style.display=self.entries.length>=self.allLanguages.length?'none':'';
 }
 function renderEntry(entry,idx){
 var div=document.createElement('div');div.className='tw-entry';
@@ -2795,7 +2793,7 @@ div.appendChild(dl);div.appendChild(document.createElement('br'));div.appendChil
 function renderAll(){
 entriesDiv.innerHTML='';
 for(var i=0;i<self.entries.length;i++){entriesDiv.appendChild(renderEntry(self.entries[i],i))}
-updateCount();
+updateSearch();
 }
 searchInput.oninput=function(){
 var val=this.value.toLowerCase();if(val.length<1){dropdown.style.display='none';return}
@@ -2810,7 +2808,7 @@ dropdown.style.display='block';
 };
 document.addEventListener('click',function(e){if(!searchArea.contains(e.target))dropdown.style.display='none'});
 self.addLanguage=function(code,name,data){
-if(self.entries.length>=self.max)return;
+if(self.entries.length>=self.allLanguages.length)return;
 if(self.entries.some(function(e){return e.langCode===code}))return;
 var entry={langCode:code,langName:name};
 if(data){if(data.name)entry.name=data.name;if(data.title)entry.title=data.title;if(data.description)entry.description=data.description}
@@ -2833,7 +2831,7 @@ if(tr.name)entry.name=tr.name;if(tr.title)entry.title=tr.title;if(tr.description
 self.entries.push(entry)}renderAll();
 };
 self.clear=function(){self.entries=[];renderAll()};
-updateCount();
+updateSearch();
 }`;
 
 app.get('/', (_req: Request, res: Response) => {
@@ -2881,7 +2879,7 @@ if(me.role==='admin'){
     const lr=await fetch('/api/v1/languages',{headers:{'Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}});
     if(lr.ok){
       const evLanguages=await lr.json();
-      evWidget=new TranslationWidget('evTranslations','ev','full',evLanguages,5);
+      evWidget=new TranslationWidget('evTranslations','ev','full',evLanguages);
     }
   })();
   document.getElementById('createBtn').onclick=async()=>{
@@ -3369,7 +3367,7 @@ ${TRANSLATION_WIDGET_SCRIPT}
   const lr=await fetch('/api/v1/languages',hdr);
   if(lr.ok){
     const evLanguages=await lr.json();
-    evWidget=new TranslationWidget('evTranslations','ev','full',evLanguages,5);
+    evWidget=new TranslationWidget('evTranslations','ev','full',evLanguages);
   }
   const r=await fetch('/api/v1/events/'+eventId+'?allTranslations=true',hdr);
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
@@ -3485,8 +3483,8 @@ async function loadLanguages(){
   const r=await fetch('/api/v1/languages',hdr);
   if(!r.ok)return;
   languages=await r.json();
-  createWidget=new TranslationWidget('createTranslations','create','name',languages,5);
-  editWidget=new TranslationWidget('editTranslations','edit','name',languages,5);
+  createWidget=new TranslationWidget('createTranslations','create','name',languages);
+  editWidget=new TranslationWidget('editTranslations','edit','name',languages);
 }
 
 document.getElementById('createBtn').onclick=async()=>{
@@ -3598,8 +3596,8 @@ async function loadLanguages(){
   const r=await fetch('/api/v1/languages',hdr);
   if(!r.ok)return;
   languages=await r.json();
-  createWidget=new TranslationWidget('createTranslations','create','name',languages,5);
-  editWidget=new TranslationWidget('editTranslations','edit','name',languages,5);
+  createWidget=new TranslationWidget('createTranslations','create','name',languages);
+  editWidget=new TranslationWidget('editTranslations','edit','name',languages);
 }
 
 async function loadCountries(){
@@ -3944,8 +3942,8 @@ async function loadLanguages(){
   const r=await fetch('/api/v1/languages',hdr);
   if(!r.ok)return;
   languages=await r.json();
-  createWidget=new TranslationWidget('createTranslations','create','name',languages,5);
-  editWidget=new TranslationWidget('editTranslations','edit','name',languages,5);
+  createWidget=new TranslationWidget('createTranslations','create','name',languages);
+  editWidget=new TranslationWidget('editTranslations','edit','name',languages);
 }
 
 document.getElementById('createBtn').onclick=async()=>{
@@ -4072,7 +4070,7 @@ ${TRANSLATION_WIDGET_SCRIPT}
   const lr=await fetch('/api/v1/languages',hdr);
   if(!lr.ok)return;
   const languages=await lr.json();
-  tagWidget=new TranslationWidget('tagTranslations','tag','name',languages,5);
+  tagWidget=new TranslationWidget('tagTranslations','tag','name',languages);
   const r=await fetch('/api/v1/tags/'+tagId+'?allTranslations=true',hdr);
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const tag=await r.json();
