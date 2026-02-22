@@ -2548,7 +2548,7 @@ app.delete('/api/v1/events/:id', async (req: Request, res: Response) => {
 
 // --- pages ---
 
-const PAGE_STYLE = `*{margin:0;padding:0;box-sizing:border-box}body{background:#fff;color:#000;font-family:monospace;font-size:16px}.c{max-width:1000px;margin:0 auto;padding:24px 16px}a{color:#000}nav{margin:8px 0 16px}nav .btn{margin:2px 0}#cityBtn{white-space:nowrap}hr{border:none;border-top:1px solid #000;margin:16px 0}input,select{border:1px solid #000;padding:6px;margin:4px 0 12px;width:100%;font-family:monospace;font-size:16px}button{border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer}#err{font-weight:bold;margin-top:12px}.dropdown{border:1px solid #000;max-height:150px;overflow-y:auto;display:none}.dropdown div{padding:4px 6px;cursor:pointer}.dropdown div:hover{background:#000;color:#fff}.bc{margin:8px 0;font-size:14px}.searchRow{display:flex;align-items:center;gap:12px;margin-bottom:12px}.searchRow input{flex:1;margin:0}.searchRow .btn{white-space:nowrap}#cityPicker{position:relative}#cityPicker input{width:180px;margin:0}#cityPicker .dropdown{position:absolute;right:0;width:180px;background:#fff;z-index:10}#langSelect{border:1px solid #000;padding:6px;font-family:monospace;font-size:14px;margin:0;width:auto}.btn{display:inline-block;border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer;text-decoration:none;margin-bottom:4px}.btn:hover{background:#000;color:#fff}.tag{display:inline-block;border:1px solid #000;padding:2px 8px;margin:2px;font-size:14px}.tag-chip{display:inline-block;border:1px solid #000;padding:2px 8px;margin:2px;font-size:14px;cursor:pointer}.tag-chip:hover{background:#000;color:#fff}#tagChips{margin:4px 0}`;
+const PAGE_STYLE = `*{margin:0;padding:0;box-sizing:border-box}body{background:#fff;color:#000;font-family:monospace;font-size:16px}.c{max-width:1000px;margin:0 auto;padding:24px 16px}a{color:#000}nav{margin:8px 0 16px}nav .btn{margin:2px 0}#cityBtn{white-space:nowrap}hr{border:none;border-top:1px solid #000;margin:16px 0}input,select{border:1px solid #000;padding:6px;margin:4px 0 12px;width:100%;font-family:monospace;font-size:16px}button{border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer}#err{font-weight:bold;margin-top:12px}.dropdown{border:1px solid #000;max-height:150px;overflow-y:auto;display:none}.dropdown div{padding:4px 6px;cursor:pointer}.dropdown div:hover{background:#000;color:#fff}.bc{margin:8px 0;font-size:14px}.searchRow{display:flex;align-items:center;gap:12px;margin-bottom:12px}.searchRow input{flex:1;margin:0}.searchRow .btn{white-space:nowrap}#cityPicker{position:relative}#cityPicker input{width:180px;margin:0}#cityPicker .dropdown{position:absolute;right:0;width:180px;background:#fff;z-index:10}#langSelect{border:1px solid #000;padding:6px;font-family:monospace;font-size:14px;margin:0;width:auto}.btn{display:inline-block;border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer;text-decoration:none;margin-bottom:4px}.btn:hover{background:#000;color:#fff}.tag{display:inline-block;border:1px solid #000;padding:2px 8px;margin:2px;font-size:14px}.tag-chip{display:inline-block;border:1px solid #000;padding:2px 8px;margin:2px;font-size:14px;cursor:pointer}.tag-chip:hover{background:#000;color:#fff}#tagChips{margin:4px 0}.tw-entry{border:1px solid #000;padding:8px;margin:4px 0}.tw-remove{border:1px solid #000;background:#fff;padding:2px 8px;cursor:pointer;font-family:monospace;font-size:14px}.tw-remove:hover{background:#000;color:#fff}.tw-count{font-size:14px;margin:4px 0}`;
 const PAGE_HEAD = `<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${PAGE_STYLE}</style>`;
 const NAV_SCRIPT = `<script>
 (function(){const t=localStorage.getItem('accessToken');if(!t)return;
@@ -2755,6 +2755,87 @@ document.getElementById('tagSearch').oninput=function(){
 };
 document.addEventListener('click',e=>{if(!e.target.closest('#tagSearch,#tagDrop'))document.getElementById('tagDrop').style.display='none'});`;
 
+const TRANSLATION_WIDGET_SCRIPT = `
+function TranslationWidget(containerId,prefix,mode,allLanguages,max){
+var self=this;self.entries=[];self.max=max||5;self.allLanguages=allLanguages;self.mode=mode;self.prefix=prefix;
+var container=document.getElementById(containerId);container.innerHTML='';
+var entriesDiv=document.createElement('div');entriesDiv.id=prefix+'_entries';container.appendChild(entriesDiv);
+var countDiv=document.createElement('div');countDiv.className='tw-count';container.appendChild(countDiv);
+var searchArea=document.createElement('div');searchArea.id=prefix+'_searchArea';searchArea.style.position='relative';
+var searchInput=document.createElement('input');searchInput.type='text';searchInput.placeholder='Search language...';searchInput.autocomplete='off';
+searchArea.appendChild(searchInput);
+var dropdown=document.createElement('div');dropdown.className='dropdown';searchArea.appendChild(dropdown);
+container.appendChild(searchArea);
+function updateCount(){
+countDiv.textContent=self.entries.length+'/'+self.max+' translations';
+searchArea.style.display=self.entries.length>=self.max?'none':'';
+}
+function renderEntry(entry,idx){
+var div=document.createElement('div');div.className='tw-entry';
+var hdr=document.createElement('div');hdr.style.display='flex';hdr.style.justifyContent='space-between';hdr.style.alignItems='center';
+var lbl=document.createElement('b');lbl.textContent=entry.langName+' ('+entry.langCode+')';hdr.appendChild(lbl);
+var rm=document.createElement('button');rm.type='button';rm.className='tw-remove';rm.textContent='x';
+rm.onclick=function(){self.entries.splice(idx,1);renderAll()};hdr.appendChild(rm);div.appendChild(hdr);
+if(mode==='name'){
+var nl=document.createElement('label');nl.textContent='Name';
+var ni=document.createElement('input');ni.type='text';ni.id=prefix+'_name_'+entry.langCode;ni.placeholder='Name in '+entry.langName;
+if(entry.name)ni.value=entry.name;
+div.appendChild(nl);div.appendChild(document.createElement('br'));div.appendChild(ni);
+}else{
+var tl=document.createElement('label');tl.textContent='Title';
+var ti=document.createElement('input');ti.type='text';ti.id=prefix+'_title_'+entry.langCode;ti.placeholder='Title in '+entry.langName;
+if(entry.title)ti.value=entry.title;
+var dl=document.createElement('label');dl.textContent='Description';
+var di=document.createElement('input');di.type='text';di.id=prefix+'_desc_'+entry.langCode;di.placeholder='Description in '+entry.langName;
+if(entry.description)di.value=entry.description;
+div.appendChild(tl);div.appendChild(document.createElement('br'));div.appendChild(ti);div.appendChild(document.createElement('br'));
+div.appendChild(dl);div.appendChild(document.createElement('br'));div.appendChild(di);
+}return div;
+}
+function renderAll(){
+entriesDiv.innerHTML='';
+for(var i=0;i<self.entries.length;i++){entriesDiv.appendChild(renderEntry(self.entries[i],i))}
+updateCount();
+}
+searchInput.oninput=function(){
+var val=this.value.toLowerCase();if(val.length<1){dropdown.style.display='none';return}
+var used=self.entries.map(function(e){return e.langCode});
+var filtered=self.allLanguages.filter(function(lang){if(used.indexOf(lang.code)>=0)return false;return lang.name.toLowerCase().indexOf(val)>=0||lang.code.toLowerCase().indexOf(val)>=0});
+dropdown.innerHTML='';if(filtered.length===0){dropdown.style.display='none';return}
+for(var i=0;i<filtered.length;i++){(function(lang){
+var d=document.createElement('div');d.textContent=lang.name+' ('+lang.code+')';
+d.onclick=function(){self.addLanguage(lang.code,lang.name);searchInput.value='';dropdown.style.display='none'};
+dropdown.appendChild(d)})(filtered[i])}
+dropdown.style.display='block';
+};
+document.addEventListener('click',function(e){if(!searchArea.contains(e.target))dropdown.style.display='none'});
+self.addLanguage=function(code,name,data){
+if(self.entries.length>=self.max)return;
+if(self.entries.some(function(e){return e.langCode===code}))return;
+var entry={langCode:code,langName:name};
+if(data){if(data.name)entry.name=data.name;if(data.title)entry.title=data.title;if(data.description)entry.description=data.description}
+self.entries.push(entry);renderAll();
+};
+self.getTranslations=function(){
+var tr=[];
+for(var i=0;i<self.entries.length;i++){var e=self.entries[i];
+if(mode==='name'){var inp=document.getElementById(prefix+'_name_'+e.langCode);if(inp&&inp.value.trim())tr.push({languageCode:e.langCode,name:inp.value.trim()})}
+else{var tti=document.getElementById(prefix+'_title_'+e.langCode);var dde=document.getElementById(prefix+'_desc_'+e.langCode);
+if(tti&&tti.value.trim())tr.push({languageCode:e.langCode,title:tti.value.trim(),description:dde?dde.value.trim():''})}}
+return tr;
+};
+self.setTranslations=function(arr){self.entries=[];if(!arr){renderAll();return}
+for(var i=0;i<arr.length;i++){var tr=arr[i];
+var lang=self.allLanguages.find(function(l){return l.code===tr.languageCode});
+var name=lang?lang.name:tr.languageCode;
+var entry={langCode:tr.languageCode,langName:name};
+if(tr.name)entry.name=tr.name;if(tr.title)entry.title=tr.title;if(tr.description)entry.description=tr.description;
+self.entries.push(entry)}renderAll();
+};
+self.clear=function(){self.entries=[];renderAll()};
+updateCount();
+}`;
+
 app.get('/', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>
 <html><head><title>Events</title>${PAGE_HEAD}<style>#end{display:none}</style>
@@ -2765,7 +2846,7 @@ ${APP_NAV}
 <hr>
 <div id="createForm" style="display:none">
 <b>Create event</b><br>
-<div id="evLangFields"></div>
+<div id="evTranslations"></div>
 ${PLACE_SEARCH_HTML}<br>
 Start<br><input type="datetime-local" id="evStart" required><br>
 End<br><input type="datetime-local" id="evEnd" required><br>
@@ -2789,34 +2870,22 @@ let me={};
 try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
 
 // --- create form (admin only) ---
-let evLanguages=[];
+let evWidget;
 if(me.role==='admin'){
   document.getElementById('createForm').style.display='block';
   ${PLACE_SEARCH_SCRIPT}
   ${ORG_SEARCH_SCRIPT}
   ${TAG_SEARCH_SCRIPT}
+  ${TRANSLATION_WIDGET_SCRIPT}
   (async()=>{
     const lr=await fetch('/api/v1/languages',{headers:{'Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}});
     if(lr.ok){
-      evLanguages=await lr.json();
-      const c=document.getElementById('evLangFields');c.innerHTML='';
-      for(const l of evLanguages){
-        const lbl1=document.createElement('label');lbl1.textContent='Title ('+l.name+')';
-        const inp1=document.createElement('input');inp1.type='text';inp1.id='evTitle_'+l.code;inp1.placeholder='Title in '+l.name;inp1.required=true;
-        const lbl2=document.createElement('label');lbl2.textContent='Description ('+l.name+')';
-        const inp2=document.createElement('input');inp2.type='text';inp2.id='evDesc_'+l.code;inp2.placeholder='Description in '+l.name;inp2.required=true;
-        c.appendChild(lbl1);c.appendChild(document.createElement('br'));c.appendChild(inp1);c.appendChild(document.createElement('br'));
-        c.appendChild(lbl2);c.appendChild(document.createElement('br'));c.appendChild(inp2);c.appendChild(document.createElement('br'));
-      }
+      const evLanguages=await lr.json();
+      evWidget=new TranslationWidget('evTranslations','ev','full',evLanguages,5);
     }
   })();
   document.getElementById('createBtn').onclick=async()=>{
-    const translations=[];
-    for(const l of evLanguages){
-      const ti=document.getElementById('evTitle_'+l.code);
-      const de=document.getElementById('evDesc_'+l.code);
-      if(ti&&ti.value.trim()&&de)translations.push({languageCode:l.code,title:ti.value.trim(),description:de.value.trim()});
-    }
+    const translations=evWidget?evWidget.getTranslations():[];
     const placeId=document.getElementById('placeId').value;
     const startDate=document.getElementById('evStart').value;
     const endDate=document.getElementById('evEnd').value;
@@ -2828,7 +2897,7 @@ if(me.role==='admin'){
     const r=await fetch('/api/v1/events',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify(body)});
     if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
     document.getElementById('err').textContent='';
-    for(const l of evLanguages){const ti=document.getElementById('evTitle_'+l.code);const de=document.getElementById('evDesc_'+l.code);if(ti)ti.value='';if(de)de.value=''}
+    if(evWidget)evWidget.clear();
     document.getElementById('placeId').value='';
     document.getElementById('placeSearch').value='';
     document.getElementById('evStart').value='';
@@ -3274,7 +3343,7 @@ ${APP_NAV}
 <hr>
 <p class="bc" id="bc"><a href="/">Events</a> /</p>
 <form id="f">
-<div id="evLangFields"></div>
+<div id="evTranslations"></div>
 ${PLACE_SEARCH_HTML}<br>
 Start<br><input type="datetime-local" name="startDate" required><br>
 End<br><input type="datetime-local" name="endDate" required><br>
@@ -3290,30 +3359,23 @@ try{const p=JSON.parse(atob(localStorage.getItem('accessToken').split('.')[1]));
 const eventId=window.location.pathname.split('/').pop();
 const _t=localStorage.getItem('accessToken');
 const hdr={headers:{'Authorization':'Bearer '+_t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}};
-let evLanguages=[];
+let evWidget;
 function _esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 ${PLACE_SEARCH_SCRIPT}
 ${ORG_SEARCH_SCRIPT}
 ${TAG_SEARCH_SCRIPT}
+${TRANSLATION_WIDGET_SCRIPT}
 (async()=>{
   const lr=await fetch('/api/v1/languages',hdr);
   if(lr.ok){
-    evLanguages=await lr.json();
-    const c=document.getElementById('evLangFields');c.innerHTML='';
-    for(const l of evLanguages){
-      const lbl1=document.createElement('label');lbl1.textContent='Title ('+l.name+')';
-      const inp1=document.createElement('input');inp1.type='text';inp1.id='evTitle_'+l.code;inp1.placeholder='Title in '+l.name;inp1.required=true;
-      const lbl2=document.createElement('label');lbl2.textContent='Description ('+l.name+')';
-      const inp2=document.createElement('input');inp2.type='text';inp2.id='evDesc_'+l.code;inp2.placeholder='Description in '+l.name;inp2.required=true;
-      c.appendChild(lbl1);c.appendChild(document.createElement('br'));c.appendChild(inp1);c.appendChild(document.createElement('br'));
-      c.appendChild(lbl2);c.appendChild(document.createElement('br'));c.appendChild(inp2);c.appendChild(document.createElement('br'));
-    }
+    const evLanguages=await lr.json();
+    evWidget=new TranslationWidget('evTranslations','ev','full',evLanguages,5);
   }
   const r=await fetch('/api/v1/events/'+eventId+'?allTranslations=true',hdr);
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const ev=await r.json();
   document.getElementById('bc').innerHTML='<a href="/">Events</a> / <a href="/view/event/'+eventId+'">'+_esc(ev.title)+'</a> / Edit';
-  if(ev.translations){for(const tr of ev.translations){const ti=document.getElementById('evTitle_'+tr.languageCode);const de=document.getElementById('evDesc_'+tr.languageCode);if(ti)ti.value=tr.title;if(de)de.value=tr.description}}
+  if(ev.translations&&evWidget){evWidget.setTranslations(ev.translations)}
   const f=document.getElementById('f');
   f.startDate.value=ev.startDate.slice(0,16);
   f.endDate.value=ev.endDate.slice(0,16);
@@ -3332,12 +3394,7 @@ document.getElementById('f').onsubmit=async e=>{
   e.preventDefault();
   const fd=Object.fromEntries(new FormData(e.target));
   if(!fd.placeId){document.getElementById('err').textContent='Please select a place';return}
-  const translations=[];
-  for(const l of evLanguages){
-    const ti=document.getElementById('evTitle_'+l.code);
-    const de=document.getElementById('evDesc_'+l.code);
-    if(ti&&ti.value.trim()&&de)translations.push({languageCode:l.code,title:ti.value.trim(),description:de.value.trim()});
-  }
+  const translations=evWidget?evWidget.getTranslations():[];
   if(translations.length===0){document.getElementById('err').textContent='Please fill at least one translation';return}
   const body={translations,placeId:fd.placeId,startDate:new Date(fd.startDate).toISOString(),endDate:new Date(fd.endDate).toISOString()};
   if(fd.organisationId)body.organisationId=fd.organisationId;
@@ -3400,13 +3457,13 @@ ${APP_NAV}
 <p class="bc">Countries /</p>
 <div id="createForm">
 <b>Add country</b><br>
-<div id="createLangFields"></div>
+<div id="createTranslations"></div>
 <button id="createBtn">Create</button>
 </div>
 <br>
 <div id="editForm" style="display:none">
 <b>Edit country</b><br>
-<div id="editLangFields"></div>
+<div id="editTranslations"></div>
 <button id="saveBtn">Save</button> <button id="cancelBtn">Cancel</button>
 </div>
 <hr>
@@ -3422,44 +3479,28 @@ function esc(s){const d=document.createElement('div');d.textContent=s;return d.i
 let editId=null;
 let languages=[];
 
+${TRANSLATION_WIDGET_SCRIPT}
+let createWidget,editWidget;
 async function loadLanguages(){
   const r=await fetch('/api/v1/languages',hdr);
   if(!r.ok)return;
   languages=await r.json();
-  renderLangFields('createLangFields','create');
-  renderLangFields('editLangFields','edit');
-}
-function renderLangFields(containerId,prefix){
-  const c=document.getElementById(containerId);c.innerHTML='';
-  for(const l of languages){
-    const lbl=document.createElement('label');
-    lbl.textContent='Name ('+l.name+')';
-    const inp=document.createElement('input');
-    inp.type='text';inp.id=prefix+'_name_'+l.code;inp.placeholder='Name in '+l.name;inp.required=true;
-    c.appendChild(lbl);c.appendChild(document.createElement('br'));c.appendChild(inp);
-  }
-}
-function getTranslations(prefix){
-  const tr=[];
-  for(const l of languages){
-    const inp=document.getElementById(prefix+'_name_'+l.code);
-    if(inp&&inp.value.trim())tr.push({languageCode:l.code,name:inp.value.trim()});
-  }
-  return tr;
+  createWidget=new TranslationWidget('createTranslations','create','name',languages,5);
+  editWidget=new TranslationWidget('editTranslations','edit','name',languages,5);
 }
 
 document.getElementById('createBtn').onclick=async()=>{
-  const translations=getTranslations('create');
+  const translations=createWidget?createWidget.getTranslations():[];
   if(translations.length===0)return;
   const r=await fetch('/api/v1/countries',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify({translations})});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
-  for(const l of languages){const inp=document.getElementById('create_name_'+l.code);if(inp)inp.value=''}
+  createWidget.clear();
   document.getElementById('err').textContent='';
   loadList();
 };
 
 document.getElementById('saveBtn').onclick=async()=>{
-  const translations=getTranslations('edit');
+  const translations=editWidget?editWidget.getTranslations():[];
   if(translations.length===0||!editId)return;
   const r=await fetch('/api/v1/countries/'+editId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify({translations})});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
@@ -3494,8 +3535,7 @@ async function loadList(){
       const r2=await fetch('/api/v1/countries/'+a.dataset.id+'?allTranslations=true',hdr);
       if(!r2.ok)return;
       const c=await r2.json();
-      renderLangFields('editLangFields','edit');
-      if(c.translations){for(const tr of c.translations){const inp=document.getElementById('edit_name_'+tr.languageCode);if(inp)inp.value=tr.name}}
+      if(editWidget){editWidget.setTranslations(c.translations)}
       document.getElementById('editForm').style.display='block';
       document.getElementById('createForm').style.display='none';
     };
@@ -3525,14 +3565,14 @@ ${APP_NAV}
 <p class="bc">Cities /</p>
 <div id="createForm">
 <b>Add city</b><br>
-<div id="createLangFields"></div>
+<div id="createTranslations"></div>
 Country<br><select id="countrySelect"><option value="">-- select --</option></select><br><br>
 <button id="createBtn">Create</button>
 </div>
 <br>
 <div id="editForm" style="display:none">
 <b>Edit city</b><br>
-<div id="editLangFields"></div>
+<div id="editTranslations"></div>
 Country<br><select id="editCountrySelect"><option value="">-- select --</option></select><br><br>
 <button id="saveBtn">Save</button> <button id="cancelBtn">Cancel</button>
 </div>
@@ -3552,30 +3592,14 @@ let countries=[];
 let languages=[];
 const hdr={headers:{'Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}};
 
+${TRANSLATION_WIDGET_SCRIPT}
+let createWidget,editWidget;
 async function loadLanguages(){
   const r=await fetch('/api/v1/languages',hdr);
   if(!r.ok)return;
   languages=await r.json();
-  renderLangFields('createLangFields','create');
-  renderLangFields('editLangFields','edit');
-}
-function renderLangFields(containerId,prefix){
-  const c=document.getElementById(containerId);c.innerHTML='';
-  for(const l of languages){
-    const lbl=document.createElement('label');
-    lbl.textContent='Name ('+l.name+')';
-    const inp=document.createElement('input');
-    inp.type='text';inp.id=prefix+'_name_'+l.code;inp.placeholder='Name in '+l.name;inp.required=true;
-    c.appendChild(lbl);c.appendChild(document.createElement('br'));c.appendChild(inp);
-  }
-}
-function getTranslations(prefix){
-  const tr=[];
-  for(const l of languages){
-    const inp=document.getElementById(prefix+'_name_'+l.code);
-    if(inp&&inp.value.trim())tr.push({languageCode:l.code,name:inp.value.trim()});
-  }
-  return tr;
+  createWidget=new TranslationWidget('createTranslations','create','name',languages,5);
+  editWidget=new TranslationWidget('editTranslations','edit','name',languages,5);
 }
 
 async function loadCountries(){
@@ -3600,18 +3624,18 @@ async function loadCountries(){
 document.getElementById('filterCountry').onchange=()=>loadList();
 
 document.getElementById('createBtn').onclick=async()=>{
-  const translations=getTranslations('create');
+  const translations=createWidget?createWidget.getTranslations():[];
   const countryId=document.getElementById('countrySelect').value;
   if(translations.length===0||!countryId)return;
   const r=await fetch('/api/v1/cities',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify({translations,countryId})});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
-  for(const l of languages){const inp=document.getElementById('create_name_'+l.code);if(inp)inp.value=''}
+  createWidget.clear();
   document.getElementById('err').textContent='';
   loadList();
 };
 
 document.getElementById('saveBtn').onclick=async()=>{
-  const translations=getTranslations('edit');
+  const translations=editWidget?editWidget.getTranslations():[];
   const countryId=document.getElementById('editCountrySelect').value;
   if(translations.length===0||!countryId||!editId)return;
   const r=await fetch('/api/v1/cities/'+editId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify({translations,countryId})});
@@ -3650,8 +3674,7 @@ async function loadList(){
       const r2=await fetch('/api/v1/cities/'+a.dataset.id+'?allTranslations=true',hdr);
       if(!r2.ok)return;
       const ci=await r2.json();
-      renderLangFields('editLangFields','edit');
-      if(ci.translations){for(const tr of ci.translations){const inp=document.getElementById('edit_name_'+tr.languageCode);if(inp)inp.value=tr.name}}
+      if(editWidget){editWidget.setTranslations(ci.translations)}
       document.getElementById('editCountrySelect').value=a.dataset.country;
       document.getElementById('editForm').style.display='block';
       document.getElementById('createForm').style.display='none';
@@ -3889,13 +3912,13 @@ ${APP_NAV}
 <hr>
 <div id="createForm">
 <b>Add tag</b><br>
-<div id="createLangFields"></div>
+<div id="createTranslations"></div>
 <button id="createBtn">Create</button>
 </div>
 <br>
 <div id="editForm" style="display:none">
 <b>Edit tag</b><br>
-<div id="editLangFields"></div>
+<div id="editTranslations"></div>
 <button id="saveBtn">Save</button> <button id="cancelBtn">Cancel</button>
 </div>
 <p id="err"></p>
@@ -3915,38 +3938,22 @@ let editId=null;
 let languages=[];
 const hdr={headers:{'Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}};
 
+${TRANSLATION_WIDGET_SCRIPT}
+let createWidget,editWidget;
 async function loadLanguages(){
   const r=await fetch('/api/v1/languages',hdr);
   if(!r.ok)return;
   languages=await r.json();
-  renderLangFields('createLangFields','create');
-  renderLangFields('editLangFields','edit');
-}
-function renderLangFields(containerId,prefix){
-  const c=document.getElementById(containerId);c.innerHTML='';
-  for(const l of languages){
-    const lbl=document.createElement('label');
-    lbl.textContent='Name ('+l.name+')';
-    const inp=document.createElement('input');
-    inp.type='text';inp.id=prefix+'_name_'+l.code;inp.placeholder='Name in '+l.name;inp.required=true;
-    c.appendChild(lbl);c.appendChild(document.createElement('br'));c.appendChild(inp);
-  }
-}
-function getTranslations(prefix){
-  const tr=[];
-  for(const l of languages){
-    const inp=document.getElementById(prefix+'_name_'+l.code);
-    if(inp&&inp.value.trim())tr.push({languageCode:l.code,name:inp.value.trim()});
-  }
-  return tr;
+  createWidget=new TranslationWidget('createTranslations','create','name',languages,5);
+  editWidget=new TranslationWidget('editTranslations','edit','name',languages,5);
 }
 
 document.getElementById('createBtn').onclick=async()=>{
-  const translations=getTranslations('create');
+  const translations=createWidget?createWidget.getTranslations():[];
   if(translations.length===0)return;
   const r=await fetch('/api/v1/tags',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify({translations})});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
-  for(const l of languages){const inp=document.getElementById('create_name_'+l.code);if(inp)inp.value=''}
+  createWidget.clear();
   document.getElementById('err').textContent='';
   page=1;done=false;
   document.getElementById('list').innerHTML='';
@@ -3955,7 +3962,7 @@ document.getElementById('createBtn').onclick=async()=>{
 };
 
 document.getElementById('saveBtn').onclick=async()=>{
-  const translations=getTranslations('edit');
+  const translations=editWidget?editWidget.getTranslations():[];
   if(translations.length===0||!editId)return;
   const r=await fetch('/api/v1/tags/'+editId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify({translations})});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
@@ -4011,8 +4018,7 @@ async function load(){
       const r2=await fetch('/api/v1/tags/'+a.dataset.id+'?allTranslations=true',hdr);
       if(!r2.ok)return;
       const tg=await r2.json();
-      renderLangFields('editLangFields','edit');
-      if(tg.translations){for(const tr of tg.translations){const inp=document.getElementById('edit_name_'+tr.languageCode);if(inp)inp.value=tr.name}}
+      if(editWidget){editWidget.setTranslations(tg.translations)}
       document.getElementById('editForm').style.display='block';
       document.getElementById('createForm').style.display='none';
     };
@@ -4048,7 +4054,7 @@ ${APP_NAV}
 <hr>
 <p class="bc" id="bc"><a href="/tags-list">Tags</a> /</p>
 <form id="f">
-<div id="langFields"></div><br>
+<div id="tagTranslations"></div><br>
 <button type="submit">Update</button>
 </form>
 <p id="err"></p>
@@ -4059,38 +4065,23 @@ try{const p=JSON.parse(atob(localStorage.getItem('accessToken').split('.')[1]));
 const tagId=window.location.pathname.split('/').pop();
 const _t=localStorage.getItem('accessToken');
 const hdr={headers:{'Authorization':'Bearer '+_t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}};
-let languages=[];
+let tagWidget;
 function _esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
-
-async function loadLanguages(){
-  const r=await fetch('/api/v1/languages',hdr);
-  if(!r.ok)return;
-  languages=await r.json();
-  const c=document.getElementById('langFields');c.innerHTML='';
-  for(const l of languages){
-    const lbl=document.createElement('label');
-    lbl.textContent='Name ('+l.name+')';
-    const inp=document.createElement('input');
-    inp.type='text';inp.id='name_'+l.code;inp.placeholder='Name in '+l.name;inp.required=true;
-    c.appendChild(lbl);c.appendChild(document.createElement('br'));c.appendChild(inp);
-  }
-}
-
+${TRANSLATION_WIDGET_SCRIPT}
 (async()=>{
-  await loadLanguages();
+  const lr=await fetch('/api/v1/languages',hdr);
+  if(!lr.ok)return;
+  const languages=await lr.json();
+  tagWidget=new TranslationWidget('tagTranslations','tag','name',languages,5);
   const r=await fetch('/api/v1/tags/'+tagId+'?allTranslations=true',hdr);
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const tag=await r.json();
   document.getElementById('bc').innerHTML='<a href="/tags-list">Tags</a> / '+_esc(tag.name)+' / Edit';
-  if(tag.translations){for(const tr of tag.translations){const inp=document.getElementById('name_'+tr.languageCode);if(inp)inp.value=tr.name}}
+  if(tag.translations&&tagWidget){tagWidget.setTranslations(tag.translations)}
 })();
 document.getElementById('f').onsubmit=async e=>{
   e.preventDefault();
-  const translations=[];
-  for(const l of languages){
-    const inp=document.getElementById('name_'+l.code);
-    if(inp&&inp.value.trim())translations.push({languageCode:l.code,name:inp.value.trim()});
-  }
+  const translations=tagWidget?tagWidget.getTranslations():[];
   if(translations.length===0)return;
   const r=await fetch('/api/v1/tags/'+tagId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+_t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify({translations})});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
