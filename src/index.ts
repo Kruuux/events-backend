@@ -4199,7 +4199,7 @@ ${APP_NAV}
 <p>Nickname: <b id="nick"></b></p>
 <p>Email: <b id="email"></b> <small>(visible only to you)</small></p>
 <br>
-<button id="logout">Log out</button> <button id="logoutAll">Log out from all devices</button>
+<button id="logout" class="btn">Log out</button> <button id="logoutAll" class="btn">Log out from all devices</button>
 <p id="err"></p>
 </div>
 <script>
