@@ -362,6 +362,7 @@ const OrganisationListSchema = v.object({
   page: v.optional(v.pipe(v.string(), v.regex(/^\d+$/)), '1'),
   limit: v.optional(v.pipe(v.string(), v.regex(/^\d+$/)), '20'),
   name: v.optional(v.string()),
+  onlyFavourites: v.optional(v.string()),
 });
 
 app.get('/api/v1/organisations', async (req: Request, res: Response) => {
@@ -378,16 +379,48 @@ app.get('/api/v1/organisations', async (req: Request, res: Response) => {
   const limit = Math.min(100, Math.max(1, Number(query.limit)));
   const offset = (page - 1) * limit;
 
-  const where = query.name ? `WHERE name ILIKE '%' || $3 || '%'` : '';
-  const params = query.name ? [limit, offset, query.name] : [limit, offset];
-  const countParams = query.name ? [query.name] : [];
-  const countWhere = query.name ? `WHERE name ILIKE '%' || $1 || '%'` : '';
+  const conditions: string[] = [];
+  const params: unknown[] = [limit, offset, payload.sub];
+  const countParams: unknown[] = [payload.sub];
+  let paramIdx = 4;
+  let countIdx = 2;
+
+  if (query.name) {
+    conditions.push(`org.name ILIKE '%' || $${paramIdx} || '%'`);
+    params.push(query.name);
+    countParams.push(query.name);
+    paramIdx++;
+    countIdx++;
+  }
+  if (query.onlyFavourites === 'true') {
+    conditions.push('fo.human_id IS NOT NULL');
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const countConditions: string[] = [];
+  let ci = 2;
+  if (query.name) {
+    countConditions.push(`org.name ILIKE '%' || $${ci} || '%'`);
+    ci++;
+  }
+  if (query.onlyFavourites === 'true') {
+    countConditions.push('fo.human_id IS NOT NULL');
+  }
+  const countWhere = countConditions.length > 0 ? `WHERE ${countConditions.join(' AND ')}` : '';
 
   const [countResult, rows] = await Promise.all([
-    pool.query(`SELECT COUNT(*) FROM organisations ${countWhere}`, countParams),
     pool.query(
-      `SELECT id, human_id AS "humanId", name, created_at AS "createdAt"
-       FROM organisations ${where} ORDER BY name ASC LIMIT $1 OFFSET $2`,
+      `SELECT COUNT(*) FROM organisations org
+       LEFT JOIN favourite_organisations fo ON fo.organisation_id = org.id AND fo.human_id = $1
+       ${countWhere}`,
+      countParams,
+    ),
+    pool.query(
+      `SELECT org.id, org.human_id AS "humanId", org.name, org.created_at AS "createdAt",
+              CASE WHEN fo.human_id IS NOT NULL THEN true ELSE false END AS "isFavourite"
+       FROM organisations org
+       LEFT JOIN favourite_organisations fo ON fo.organisation_id = org.id AND fo.human_id = $3
+       ${where} ORDER BY org.name ASC LIMIT $1 OFFSET $2`,
       params,
     ),
   ]);
@@ -1040,6 +1073,7 @@ const PlaceListSchema = v.object({
   limit: v.optional(v.pipe(v.string(), v.regex(/^\d+$/)), '20'),
   search: v.optional(v.string()),
   cityId: v.optional(UuidSchema),
+  onlyFavourites: v.optional(v.string()),
 });
 
 app.get('/api/v1/places', async (req: Request, res: Response) => {
@@ -1057,9 +1091,10 @@ app.get('/api/v1/places', async (req: Request, res: Response) => {
   const offset = (page - 1) * limit;
 
   const conditions: string[] = [];
-  const params: unknown[] = [limit, offset];
-  const countParams: unknown[] = [];
-  let paramIdx = 3;
+  const params: unknown[] = [limit, offset, payload.sub];
+  const countParams: unknown[] = [payload.sub];
+  let paramIdx = 4;
+  let countIdx = 2;
 
   if (query.search) {
     conditions.push(
@@ -1068,18 +1103,23 @@ app.get('/api/v1/places', async (req: Request, res: Response) => {
     params.push(query.search);
     countParams.push(query.search);
     paramIdx++;
+    countIdx++;
   }
   if (query.cityId) {
     conditions.push(`p.city_id = $${paramIdx}`);
     params.push(query.cityId);
     countParams.push(query.cityId);
     paramIdx++;
+    countIdx++;
+  }
+  if (query.onlyFavourites === 'true') {
+    conditions.push('fp.human_id IS NOT NULL');
   }
 
   const where =
     conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const countConditions: string[] = [];
-  let ci = 1;
+  let ci = 2;
   if (query.search) {
     countConditions.push(
       `(p.name ILIKE '%' || $${ci} || '%' OR p.address ILIKE '%' || $${ci} || '%')`,
@@ -1090,18 +1130,28 @@ app.get('/api/v1/places', async (req: Request, res: Response) => {
     countConditions.push(`p.city_id = $${ci}`);
     ci++;
   }
+  if (query.onlyFavourites === 'true') {
+    countConditions.push('fp.human_id IS NOT NULL');
+  }
   const countWhere =
     countConditions.length > 0 ? `WHERE ${countConditions.join(' AND ')}` : '';
 
   const [countResult, rows] = await Promise.all([
-    pool.query(`SELECT COUNT(*) FROM places p ${countWhere}`, countParams),
+    pool.query(
+      `SELECT COUNT(*) FROM places p
+       LEFT JOIN favourite_places fp ON fp.place_id = p.id AND fp.human_id = $1
+       ${countWhere}`,
+      countParams,
+    ),
     pool.query(
       `SELECT p.id, p.city_id AS "cityId", p.name, p.address, p.latitude, p.longitude,
               ci.name AS "cityName", co.name AS "countryName",
-              p.created_at AS "createdAt", p.updated_at AS "updatedAt"
+              p.created_at AS "createdAt", p.updated_at AS "updatedAt",
+              CASE WHEN fp.human_id IS NOT NULL THEN true ELSE false END AS "isFavourite"
        FROM places p
        JOIN cities ci ON ci.id = p.city_id
        JOIN countries co ON co.id = ci.country_id
+       LEFT JOIN favourite_places fp ON fp.place_id = p.id AND fp.human_id = $3
        ${where} ORDER BY p.name ASC LIMIT $1 OFFSET $2`,
       params,
     ),
@@ -1222,6 +1272,96 @@ app.delete('/api/v1/places/:id', async (req: Request, res: Response) => {
   }
 });
 
+// --- favourites ---
+
+const FavouriteOrganisationSchema = v.object({
+  organisationId: UuidSchema,
+});
+
+app.post('/api/v1/favourite-organisations', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+
+  const data = validate(FavouriteOrganisationSchema, req.body, res);
+  if (!data) return;
+
+  await pool.query(
+    'INSERT INTO favourite_organisations (human_id, organisation_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+    [payload.sub, data.organisationId],
+  );
+
+  res.status(200).end();
+});
+
+const FavouriteOrganisationParamSchema = v.object({
+  organisationId: UuidSchema,
+});
+
+app.delete('/api/v1/favourite-organisations/:organisationId', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+
+  const params = validate(FavouriteOrganisationParamSchema, req.params, res);
+  if (!params) return;
+
+  await pool.query(
+    'DELETE FROM favourite_organisations WHERE human_id = $1 AND organisation_id = $2',
+    [payload.sub, params.organisationId],
+  );
+
+  res.status(200).end();
+});
+
+const FavouritePlaceSchema = v.object({
+  placeId: UuidSchema,
+});
+
+app.post('/api/v1/favourite-places', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+
+  const data = validate(FavouritePlaceSchema, req.body, res);
+  if (!data) return;
+
+  await pool.query(
+    'INSERT INTO favourite_places (human_id, place_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+    [payload.sub, data.placeId],
+  );
+
+  res.status(200).end();
+});
+
+const FavouritePlaceParamSchema = v.object({
+  placeId: UuidSchema,
+});
+
+app.delete('/api/v1/favourite-places/:placeId', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+
+  const params = validate(FavouritePlaceParamSchema, req.params, res);
+  if (!params) return;
+
+  await pool.query(
+    'DELETE FROM favourite_places WHERE human_id = $1 AND place_id = $2',
+    [payload.sub, params.placeId],
+  );
+
+  res.status(200).end();
+});
+
 // --- events ---
 
 const CreateEventSchema = v.object({
@@ -1288,6 +1428,12 @@ app.post('/api/v1/events', async (req: Request, res: Response) => {
   res.status(201).json(row.rows[0]);
 });
 
+const EventListSchema = v.object({
+  page: v.optional(v.pipe(v.string(), v.regex(/^\d+$/)), '1'),
+  limit: v.optional(v.pipe(v.string(), v.regex(/^\d+$/)), '20'),
+  search: v.optional(v.string()),
+});
+
 app.get('/api/v1/events', async (req: Request, res: Response) => {
   const payload = authenticate(req);
   if (!payload) {
@@ -1295,15 +1441,30 @@ app.get('/api/v1/events', async (req: Request, res: Response) => {
     return;
   }
 
-  const query = validate(PaginationSchema, req.query, res);
+  const query = validate(EventListSchema, req.query, res);
   if (!query) return;
 
   const page = Math.max(1, Number(query.page));
   const limit = Math.min(100, Math.max(1, Number(query.limit)));
   const offset = (page - 1) * limit;
 
+  const searchFilter = query.search
+    ? `AND (e.title ILIKE '%' || $3 || '%' OR p.name ILIKE '%' || $3 || '%' OR o.name ILIKE '%' || $3 || '%')`
+    : '';
+  const countSearchFilter = query.search
+    ? `AND (e.title ILIKE '%' || $1 || '%' OR p.name ILIKE '%' || $1 || '%' OR o.name ILIKE '%' || $1 || '%')`
+    : '';
+  const params = query.search ? [limit, offset, query.search] : [limit, offset];
+  const countParams = query.search ? [query.search] : [];
+
   const [countResult, rows] = await Promise.all([
-    pool.query('SELECT COUNT(*) FROM events WHERE start_date >= CURRENT_DATE'),
+    pool.query(
+      `SELECT COUNT(*) FROM events e
+       JOIN places p ON p.id = e.place_id
+       LEFT JOIN organisations o ON o.id = e.organisation_id
+       WHERE e.start_date >= CURRENT_DATE ${countSearchFilter}`,
+      countParams,
+    ),
     pool.query(
       `SELECT e.id, e.human_id AS "humanId", e.organisation_id AS "organisationId",
               e.place_id AS "placeId", e.title, e.description,
@@ -1313,9 +1474,9 @@ app.get('/api/v1/events', async (req: Request, res: Response) => {
        FROM events e
        JOIN places p ON p.id = e.place_id
        LEFT JOIN organisations o ON o.id = e.organisation_id
-       WHERE e.start_date >= CURRENT_DATE
+       WHERE e.start_date >= CURRENT_DATE ${searchFilter}
        ORDER BY e.start_date ASC LIMIT $1 OFFSET $2`,
-      [limit, offset],
+      params,
     ),
   ]);
 
@@ -1516,7 +1677,7 @@ const NAV_SCRIPT = `<script>
 try{const p=JSON.parse(atob(t.split('.')[1]));
 if(p.role==='admin'){const s=document.getElementById('adminNav');if(s)s.style.display='inline'}}catch{}})();
 </script>`;
-const APP_NAV = `<nav>[<a href="/">Events</a>] [<a href="/organisations-list">Organisations</a>] <span id="adminNav" style="display:none">[<a href="/countries-list">Countries</a>] [<a href="/cities-list">Cities</a>] [<a href="/places-list">Places</a>] </span>[<a href="/profile">Profile</a>]</nav>${NAV_SCRIPT}`;
+const APP_NAV = `<nav>[<a href="/">Events</a>] [<a href="/organisations-list">Organisations</a>] [<a href="/places-list">Places</a>] <span id="adminNav" style="display:none">[<a href="/countries-list">Countries</a>] [<a href="/cities-list">Cities</a>] </span>[<a href="/profile">Profile</a>]</nav>${NAV_SCRIPT}`;
 
 const ORG_SEARCH_HTML = `Organisation (optional)<br><input type="text" id="orgSearch" placeholder="Search by name..." autocomplete="off"><input type="hidden" name="organisationId" id="orgId"><div class="dropdown" id="orgDrop"></div>`;
 const ORG_SEARCH_SCRIPT = `
@@ -1527,7 +1688,7 @@ document.getElementById('orgSearch').oninput=function(){
   const drop=document.getElementById('orgDrop');
   if(v.length<2){drop.style.display='none';document.getElementById('orgId').value='';return}
   debounce=setTimeout(async()=>{
-    const r=await fetch('/api/v1/organisations?name='+encodeURIComponent(v)+'&limit=10');
+    const r=await fetch('/api/v1/organisations?name='+encodeURIComponent(v)+'&limit=10',{headers:{'Authorization':'Bearer '+localStorage.getItem('accessToken')}});
     if(!r.ok)return;
     const j=await r.json();
     drop.innerHTML='';
@@ -1552,7 +1713,7 @@ document.getElementById('placeSearch').oninput=function(){
   const drop=document.getElementById('placeDrop');
   if(v.length<2){drop.style.display='none';document.getElementById('placeId').value='';return}
   placeDebounce=setTimeout(async()=>{
-    const r=await fetch('/api/v1/places?search='+encodeURIComponent(v)+'&limit=10');
+    const r=await fetch('/api/v1/places?search='+encodeURIComponent(v)+'&limit=10',{headers:{'Authorization':'Bearer '+localStorage.getItem('accessToken')}});
     if(!r.ok)return;
     const j=await r.json();
     drop.innerHTML='';
@@ -1590,6 +1751,7 @@ ${ORG_SEARCH_HTML}<br>
 <p id="err"></p>
 <hr>
 </div>
+<input type="text" id="searchInput" placeholder="Search events..." style="margin-bottom:12px">
 <p id="toggle"><b>list</b> | <a href="#" id="toMap">map</a></p>
 <div id="listView">
 <div id="list"></div>
@@ -1642,7 +1804,7 @@ if(me.role==='admin'){
 
 // --- list view ---
 let page=1;const limit=20;let loading=false;let done=false;
-let lastDateLabel='';
+let lastDateLabel='';let searchTerm='';
 function dateLabel(ds){
   const dt=new Date(ds);
   const now=new Date();
@@ -1653,11 +1815,25 @@ function dateLabel(ds){
   if(dd.getTime()===tmrw.getTime())return 'Tomorrow';
   return dt.getDate()+' '+dt.toLocaleString('en',{month:'long'})+' '+dt.getFullYear();
 }
+let searchDebounce;
+document.getElementById('searchInput').oninput=function(){
+  clearTimeout(searchDebounce);
+  const v=this.value.trim();
+  searchDebounce=setTimeout(()=>{
+    if(v.length>=2){searchTerm=v}else{searchTerm=''}
+    page=1;done=false;lastDateLabel='';
+    document.getElementById('list').innerHTML='';
+    document.getElementById('end').style.display='none';
+    load();
+  },300);
+};
 async function load(){
   if(loading||done)return;
   loading=true;
   document.getElementById('loading').style.display='block';
-  const r=await fetch('/api/v1/events?page='+page+'&limit='+limit);
+  let url='/api/v1/events?page='+page+'&limit='+limit;
+  if(searchTerm)url+='&search='+encodeURIComponent(searchTerm);
+  const r=await fetch(url,{headers:{'Authorization':'Bearer '+t}});
   if(!r.ok){loading=false;document.getElementById('loading').style.display='none';return}
   const j=await r.json();
   const list=document.getElementById('list');
@@ -1730,7 +1906,7 @@ async function loadArea(){
   }
   msg.textContent='';
 
-  const r=await fetch('/api/v1/events/area?minLat='+minLat+'&maxLat='+maxLat+'&minLng='+minLng+'&maxLng='+maxLng);
+  const r=await fetch('/api/v1/events/area?minLat='+minLat+'&maxLat='+maxLat+'&minLng='+minLng+'&maxLng='+maxLng,{headers:{'Authorization':'Bearer '+t}});
   if(!r.ok)return;
   const j=await r.json();
   for(const ev of j.data){
@@ -1786,6 +1962,8 @@ ${APP_NAV}
 <p id="err"></p>
 <hr>
 </div>
+<input type="text" id="searchInput" placeholder="Search organisations..." style="margin-bottom:12px">
+<p id="favToggle"><a href="#" id="favLink">[Show favourites]</a></p>
 <div id="list"></div>
 <p id="loading">Loading...</p>
 <p id="end">---</p>
@@ -1813,11 +1991,36 @@ if(me.role==='admin'){
 }
 
 let page=1;const limit=20;let loading=false;let done=false;
+let searchTerm='';let onlyFavourites=false;
+let searchDebounce;
+document.getElementById('searchInput').oninput=function(){
+  clearTimeout(searchDebounce);
+  const v=this.value.trim();
+  searchDebounce=setTimeout(()=>{
+    if(v.length>=2){searchTerm=v}else{searchTerm=''}
+    page=1;done=false;
+    document.getElementById('list').innerHTML='';
+    document.getElementById('end').style.display='none';
+    load();
+  },300);
+};
+document.getElementById('favLink').onclick=function(e){
+  e.preventDefault();
+  onlyFavourites=!onlyFavourites;
+  this.textContent=onlyFavourites?'[Show all]':'[Show favourites]';
+  page=1;done=false;
+  document.getElementById('list').innerHTML='';
+  document.getElementById('end').style.display='none';
+  load();
+};
 async function load(){
   if(loading||done)return;
   loading=true;
   document.getElementById('loading').style.display='block';
-  const r=await fetch('/api/v1/organisations?page='+page+'&limit='+limit);
+  let url='/api/v1/organisations?page='+page+'&limit='+limit;
+  if(searchTerm)url+='&name='+encodeURIComponent(searchTerm);
+  if(onlyFavourites)url+='&onlyFavourites=true';
+  const r=await fetch(url,{headers:{'Authorization':'Bearer '+t}});
   if(!r.ok){loading=false;document.getElementById('loading').style.display='none';return}
   const j=await r.json();
   const list=document.getElementById('list');
@@ -1825,6 +2028,7 @@ async function load(){
     const dv=document.createElement('div');
     let oHtml='<a href="/view/organisation/'+o.id+'"><b>'+esc(o.name)+'</b></a>';
     if(me.role==='admin')oHtml+=' <a href="/edit/organisation/'+o.id+'">[edit]</a> <a href="#" class="delOrg" data-id="'+o.id+'">[delete]</a>';
+    oHtml+=' <a href="#" class="favOrg" data-id="'+o.id+'" data-fav="'+o.isFavourite+'">'+(o.isFavourite?'[Remove from favourites]':'[Add to favourites]')+'</a>';
     oHtml+='<hr>';
     dv.innerHTML=oHtml;
     list.appendChild(dv);
@@ -1837,6 +2041,19 @@ async function load(){
       if(!r2.ok){const j2=await r2.json();document.getElementById('err').textContent=j2.code||JSON.stringify(j2);return}
       document.getElementById('err').textContent='';
       a.closest('div').remove();
+    };
+  });
+  list.querySelectorAll('.favOrg').forEach(a=>{
+    a.onclick=async e=>{
+      e.preventDefault();
+      const isFav=a.dataset.fav==='true';
+      if(isFav){
+        await fetch('/api/v1/favourite-organisations/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
+        a.dataset.fav='false';a.textContent='[Add to favourites]';
+      }else{
+        await fetch('/api/v1/favourite-organisations',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({organisationId:a.dataset.id})});
+        a.dataset.fav='true';a.textContent='[Remove from favourites]';
+      }
     };
   });
   if(page*limit>=j.count){done=true;document.getElementById('end').style.display='block'}
@@ -1869,7 +2086,7 @@ const t=localStorage.getItem('accessToken');
 let me={};
 try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
 (async()=>{
-  const r=await fetch('/api/v1/events/'+id);
+  const r=await fetch('/api/v1/events/'+id,{headers:{'Authorization':'Bearer '+t}});
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const ev=await r.json();
   document.getElementById('title').textContent=ev.title;
@@ -1922,7 +2139,7 @@ const t=localStorage.getItem('accessToken');
 let me={};
 try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
 (async()=>{
-  const r=await fetch('/api/v1/organisations/'+id);
+  const r=await fetch('/api/v1/organisations/'+id,{headers:{'Authorization':'Bearer '+t}});
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const o=await r.json();
   document.getElementById('title').textContent=o.name;
@@ -1960,7 +2177,7 @@ async function loadEvents(){
   if(evLoading||evDone)return;
   evLoading=true;
   document.getElementById('loading').style.display='block';
-  const r=await fetch('/api/v1/organisations/'+id+'/events?page='+evPage+'&limit='+evLimit);
+  const r=await fetch('/api/v1/organisations/'+id+'/events?page='+evPage+'&limit='+evLimit,{headers:{'Authorization':'Bearer '+t}});
   if(!r.ok){evLoading=false;document.getElementById('loading').style.display='none';return}
   const j=await r.json();
   const list=document.getElementById('list');
@@ -2009,9 +2226,10 @@ ${APP_NAV}
 </div>
 <script>
 if(!localStorage.getItem('accessToken'))window.location.href='/login';
+const t=localStorage.getItem('accessToken');
 const id=window.location.pathname.split('/').pop();
 (async()=>{
-  const r=await fetch('/api/v1/places/'+id);
+  const r=await fetch('/api/v1/places/'+id,{headers:{'Authorization':'Bearer '+t}});
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const p=await r.json();
   document.getElementById('title').textContent=p.name;
@@ -2037,7 +2255,7 @@ async function loadEvents(){
   if(evLoading||evDone)return;
   evLoading=true;
   document.getElementById('loading').style.display='block';
-  const r=await fetch('/api/v1/places/'+id+'/events?page='+evPage+'&limit='+evLimit);
+  const r=await fetch('/api/v1/places/'+id+'/events?page='+evPage+'&limit='+evLimit,{headers:{'Authorization':'Bearer '+t}});
   if(!r.ok){evLoading=false;document.getElementById('loading').style.display='none';return}
   const j=await r.json();
   const list=document.getElementById('list');
@@ -2095,7 +2313,8 @@ const eventId=window.location.pathname.split('/').pop();
 ${PLACE_SEARCH_SCRIPT}
 ${ORG_SEARCH_SCRIPT}
 (async()=>{
-  const r=await fetch('/api/v1/events/'+eventId);
+  const _t=localStorage.getItem('accessToken');
+  const r=await fetch('/api/v1/events/'+eventId,{headers:{'Authorization':'Bearer '+_t}});
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const ev=await r.json();
   const f=document.getElementById('f');
@@ -2109,7 +2328,7 @@ ${ORG_SEARCH_SCRIPT}
   }
   if(ev.organisationId){
     document.getElementById('orgId').value=ev.organisationId;
-    const or=await fetch('/api/v1/organisations/'+ev.organisationId);
+    const or=await fetch('/api/v1/organisations/'+ev.organisationId,{headers:{'Authorization':'Bearer '+_t}});
     if(or.ok){const oj=await or.json();document.getElementById('orgSearch').value=oj.name}
   }
 })();
@@ -2146,7 +2365,7 @@ if(!localStorage.getItem('accessToken'))window.location.href='/login';
 try{const p=JSON.parse(atob(localStorage.getItem('accessToken').split('.')[1]));if(p.role!=='admin')window.location.href='/'}catch{window.location.href='/login'}
 const orgId=window.location.pathname.split('/').pop();
 (async()=>{
-  const r=await fetch('/api/v1/organisations/'+orgId);
+  const r=await fetch('/api/v1/organisations/'+orgId,{headers:{'Authorization':'Bearer '+localStorage.getItem('accessToken')}});
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const o=await r.json();
   document.getElementById('f').name.value=o.name;
@@ -2222,7 +2441,7 @@ document.getElementById('cancelBtn').onclick=()=>{
 };
 
 async function loadList(){
-  const r=await fetch('/api/v1/countries?limit=100');
+  const r=await fetch('/api/v1/countries?limit=100',{headers:{'Authorization':'Bearer '+t}});
   if(!r.ok)return;
   const j=await r.json();
   const list=document.getElementById('list');
@@ -2292,7 +2511,7 @@ let editId=null;
 let countries=[];
 
 async function loadCountries(){
-  const r=await fetch('/api/v1/countries?limit=100');
+  const r=await fetch('/api/v1/countries?limit=100',{headers:{'Authorization':'Bearer '+t}});
   if(!r.ok)return;
   const j=await r.json();
   countries=j.data;
@@ -2346,7 +2565,7 @@ async function loadList(){
   const countryId=document.getElementById('filterCountry').value;
   let url='/api/v1/cities?limit=100';
   if(countryId)url+='&countryId='+countryId;
-  const r=await fetch(url);
+  const r=await fetch(url,{headers:{'Authorization':'Bearer '+t}});
   if(!r.ok)return;
   const j=await r.json();
   const list=document.getElementById('list');
@@ -2384,12 +2603,12 @@ loadCountries().then(()=>loadList());
 
 app.get('/places-list', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>
-<html><head><title>Places</title>${PAGE_HEAD}</head><body>
+<html><head><title>Places</title>${PAGE_HEAD}<style>#end{display:none}</style></head><body>
 <div class="c">
 <h1>Places</h1>
 ${APP_NAV}
 <hr>
-<div id="createForm">
+<div id="createForm" style="display:none">
 <b>Add place</b><br>
 Name<br><input type="text" id="placeName" placeholder="Place name" required><br>
 Address<br><input type="text" id="placeAddress" placeholder="Address" required><br>
@@ -2398,7 +2617,6 @@ Longitude<br><input type="number" id="placeLng" step="any" min="-180" max="180" 
 City<br><select id="citySelect"><option value="">-- select --</option></select><br><br>
 <button id="createBtn">Create</button>
 </div>
-<br>
 <div id="editForm" style="display:none">
 <b>Edit place</b><br>
 Name<br><input type="text" id="editName" placeholder="Place name" required><br>
@@ -2408,93 +2626,135 @@ Longitude<br><input type="number" id="editLng" step="any" min="-180" max="180" r
 City<br><select id="editCitySelect"><option value="">-- select --</option></select><br><br>
 <button id="saveBtn">Save</button> <button id="cancelBtn">Cancel</button>
 </div>
-<hr>
-Filter by city: <select id="filterCity"><option value="">All</option></select>
-<hr>
-<div id="list"></div>
 <p id="err"></p>
+<hr>
+<input type="text" id="searchInput" placeholder="Search places..." style="margin-bottom:12px">
+<p id="favToggle"><a href="#" id="favLink">[Show favourites]</a></p>
+<div id="list"></div>
+<p id="loading">Loading...</p>
+<p id="end">---</p>
 </div>
 <script>
 if(!localStorage.getItem('accessToken'))window.location.href='/login';
-try{const p=JSON.parse(atob(localStorage.getItem('accessToken').split('.')[1]));if(p.role!=='admin')window.location.href='/'}catch{window.location.href='/login'}
 const t=localStorage.getItem('accessToken');
+let me={};
+try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 let editId=null;
 
-async function loadCities(){
-  const r=await fetch('/api/v1/cities?limit=100');
-  if(!r.ok)return;
-  const j=await r.json();
-  for(const sel of [document.getElementById('citySelect'),document.getElementById('editCitySelect'),document.getElementById('filterCity')]){
-    const val=sel.value;
-    const first=sel.options[0];
-    sel.innerHTML='';
-    sel.appendChild(first);
-    for(const c of j.data){
-      const o=document.createElement('option');
-      o.value=c.id;o.textContent=c.name+' ('+c.countryName+')';
-      sel.appendChild(o);
+if(me.role==='admin'){
+  document.getElementById('createForm').style.display='block';
+
+  async function loadCities(){
+    const r=await fetch('/api/v1/cities?limit=100',{headers:{'Authorization':'Bearer '+t}});
+    if(!r.ok)return;
+    const j=await r.json();
+    for(const sel of [document.getElementById('citySelect'),document.getElementById('editCitySelect')]){
+      const val=sel.value;
+      const first=sel.options[0];
+      sel.innerHTML='';
+      sel.appendChild(first);
+      for(const c of j.data){
+        const o=document.createElement('option');
+        o.value=c.id;o.textContent=c.name+' ('+c.countryName+')';
+        sel.appendChild(o);
+      }
+      sel.value=val;
     }
-    sel.value=val;
   }
+  loadCities();
+
+  document.getElementById('createBtn').onclick=async()=>{
+    const name=document.getElementById('placeName').value.trim();
+    const address=document.getElementById('placeAddress').value.trim();
+    const latitude=Number(document.getElementById('placeLat').value);
+    const longitude=Number(document.getElementById('placeLng').value);
+    const cityId=document.getElementById('citySelect').value;
+    if(!name||!address||!cityId)return;
+    const r=await fetch('/api/v1/places',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name,address,latitude,longitude,cityId})});
+    if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+    document.getElementById('placeName').value='';
+    document.getElementById('placeAddress').value='';
+    document.getElementById('placeLat').value='';
+    document.getElementById('placeLng').value='';
+    document.getElementById('err').textContent='';
+    page=1;done=false;
+    document.getElementById('list').innerHTML='';
+    document.getElementById('end').style.display='none';
+    load();
+  };
+
+  document.getElementById('saveBtn').onclick=async()=>{
+    const name=document.getElementById('editName').value.trim();
+    const address=document.getElementById('editAddress').value.trim();
+    const latitude=Number(document.getElementById('editLat').value);
+    const longitude=Number(document.getElementById('editLng').value);
+    const cityId=document.getElementById('editCitySelect').value;
+    if(!name||!address||!cityId||!editId)return;
+    const r=await fetch('/api/v1/places/'+editId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name,address,latitude,longitude,cityId})});
+    if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+    document.getElementById('editForm').style.display='none';
+    document.getElementById('createForm').style.display='block';
+    editId=null;
+    document.getElementById('err').textContent='';
+    page=1;done=false;
+    document.getElementById('list').innerHTML='';
+    document.getElementById('end').style.display='none';
+    load();
+  };
+
+  document.getElementById('cancelBtn').onclick=()=>{
+    document.getElementById('editForm').style.display='none';
+    document.getElementById('createForm').style.display='block';
+    editId=null;
+  };
 }
 
-document.getElementById('filterCity').onchange=()=>loadList();
-
-document.getElementById('createBtn').onclick=async()=>{
-  const name=document.getElementById('placeName').value.trim();
-  const address=document.getElementById('placeAddress').value.trim();
-  const latitude=Number(document.getElementById('placeLat').value);
-  const longitude=Number(document.getElementById('placeLng').value);
-  const cityId=document.getElementById('citySelect').value;
-  if(!name||!address||!cityId)return;
-  const r=await fetch('/api/v1/places',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name,address,latitude,longitude,cityId})});
-  if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
-  document.getElementById('placeName').value='';
-  document.getElementById('placeAddress').value='';
-  document.getElementById('placeLat').value='';
-  document.getElementById('placeLng').value='';
-  document.getElementById('err').textContent='';
-  loadList();
+let page=1;const limit=20;let loading=false;let done=false;
+let searchTerm='';let onlyFavourites=false;
+let searchDebounce;
+document.getElementById('searchInput').oninput=function(){
+  clearTimeout(searchDebounce);
+  const v=this.value.trim();
+  searchDebounce=setTimeout(()=>{
+    if(v.length>=2){searchTerm=v}else{searchTerm=''}
+    page=1;done=false;
+    document.getElementById('list').innerHTML='';
+    document.getElementById('end').style.display='none';
+    load();
+  },300);
 };
-
-document.getElementById('saveBtn').onclick=async()=>{
-  const name=document.getElementById('editName').value.trim();
-  const address=document.getElementById('editAddress').value.trim();
-  const latitude=Number(document.getElementById('editLat').value);
-  const longitude=Number(document.getElementById('editLng').value);
-  const cityId=document.getElementById('editCitySelect').value;
-  if(!name||!address||!cityId||!editId)return;
-  const r=await fetch('/api/v1/places/'+editId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name,address,latitude,longitude,cityId})});
-  if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
-  document.getElementById('editForm').style.display='none';
-  document.getElementById('createForm').style.display='block';
-  editId=null;
-  document.getElementById('err').textContent='';
-  loadList();
+document.getElementById('favLink').onclick=function(e){
+  e.preventDefault();
+  onlyFavourites=!onlyFavourites;
+  this.textContent=onlyFavourites?'[Show all]':'[Show favourites]';
+  page=1;done=false;
+  document.getElementById('list').innerHTML='';
+  document.getElementById('end').style.display='none';
+  load();
 };
-
-document.getElementById('cancelBtn').onclick=()=>{
-  document.getElementById('editForm').style.display='none';
-  document.getElementById('createForm').style.display='block';
-  editId=null;
-};
-
-async function loadList(){
-  const cityId=document.getElementById('filterCity').value;
-  let url='/api/v1/places?limit=100';
-  if(cityId)url+='&cityId='+cityId;
-  const r=await fetch(url);
-  if(!r.ok)return;
+async function load(){
+  if(loading||done)return;
+  loading=true;
+  document.getElementById('loading').style.display='block';
+  let url='/api/v1/places?page='+page+'&limit='+limit;
+  if(searchTerm)url+='&search='+encodeURIComponent(searchTerm);
+  if(onlyFavourites)url+='&onlyFavourites=true';
+  const r=await fetch(url,{headers:{'Authorization':'Bearer '+t}});
+  if(!r.ok){loading=false;document.getElementById('loading').style.display='none';return}
   const j=await r.json();
   const list=document.getElementById('list');
-  list.innerHTML='';
   for(const p of j.data){
     const d=document.createElement('div');
-    d.innerHTML='<b>'+esc(p.name)+'</b><br>'+esc(p.address)+' <small>('+esc(p.cityName)+', '+esc(p.countryName)+')</small><br>'
-      +'<small>Lat: '+p.latitude+', Lng: '+p.longitude+'</small> '
-      +'<a href="#" class="edit" data-id="'+p.id+'" data-name="'+esc(p.name)+'" data-address="'+esc(p.address)+'" data-lat="'+p.latitude+'" data-lng="'+p.longitude+'" data-city="'+p.cityId+'">[edit]</a> '
-      +'<a href="#" class="del" data-id="'+p.id+'">[delete]</a><hr>';
+    let pHtml='<a href="/view/place/'+p.id+'"><b>'+esc(p.name)+'</b></a><br>'+esc(p.address)+' <small>('+esc(p.cityName)+', '+esc(p.countryName)+')</small><br>'
+      +'<small>Lat: '+p.latitude+', Lng: '+p.longitude+'</small>';
+    if(me.role==='admin'){
+      pHtml+=' <a href="#" class="edit" data-id="'+p.id+'" data-name="'+esc(p.name)+'" data-address="'+esc(p.address)+'" data-lat="'+p.latitude+'" data-lng="'+p.longitude+'" data-city="'+p.cityId+'">[edit]</a>'
+        +' <a href="#" class="del" data-id="'+p.id+'">[delete]</a>';
+    }
+    pHtml+=' <a href="#" class="favPlace" data-id="'+p.id+'" data-fav="'+p.isFavourite+'">'+(p.isFavourite?'[Remove from favourites]':'[Add to favourites]')+'</a>';
+    pHtml+='<hr>';
+    d.innerHTML=pHtml;
     list.appendChild(d);
   }
   list.querySelectorAll('.edit').forEach(a=>{
@@ -2517,11 +2777,31 @@ async function loadList(){
       const r=await fetch('/api/v1/places/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
       if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
       document.getElementById('err').textContent='';
-      loadList();
+      a.closest('div').remove();
     };
   });
+  list.querySelectorAll('.favPlace').forEach(a=>{
+    a.onclick=async e=>{
+      e.preventDefault();
+      const isFav=a.dataset.fav==='true';
+      if(isFav){
+        await fetch('/api/v1/favourite-places/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
+        a.dataset.fav='false';a.textContent='[Add to favourites]';
+      }else{
+        await fetch('/api/v1/favourite-places',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({placeId:a.dataset.id})});
+        a.dataset.fav='true';a.textContent='[Remove from favourites]';
+      }
+    };
+  });
+  if(page*limit>=j.count){done=true;document.getElementById('end').style.display='block'}
+  else{page++}
+  loading=false;
+  document.getElementById('loading').style.display=done?'none':'block';
 }
-loadCities().then(()=>loadList());
+window.addEventListener('scroll',()=>{
+  if(window.innerHeight+window.scrollY>=document.body.offsetHeight-200)load();
+});
+load();
 </script>
 </body></html>`);
 });

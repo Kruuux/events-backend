@@ -9,7 +9,7 @@ let baseUrl: string;
 
 before(async () => {
   await pool.query(
-    'TRUNCATE events, places, cities, countries, organisations, sessions, humans CASCADE',
+    'TRUNCATE favourite_places, favourite_organisations, events, places, cities, countries, organisations, sessions, humans CASCADE',
   );
   server = app.listen(0, () => {
     const addr = server.address();

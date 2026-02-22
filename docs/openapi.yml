@@ -114,6 +114,37 @@ paths:
               example:
                 code: INVALID_REFRESH_TOKEN_EXCEPTION
 
+  /api/v1/logout:
+    post:
+      summary: End current session
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken:
+                  type: string
+      responses:
+        "200":
+          description: Session ended
+        "400":
+          $ref: "#/components/responses/ValidationException"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: SESSION_NOT_FOUND_EXCEPTION
+
   /api/v1/logout-all:
     post:
       summary: End all sessions
@@ -134,6 +165,8 @@ paths:
   /api/v1/humans:
     get:
       summary: Search humans by nickname
+      security:
+        - bearerAuth: []
       parameters:
         - name: nickname
           in: query
@@ -207,6 +240,8 @@ paths:
 
     get:
       summary: List organisations
+      security:
+        - bearerAuth: []
       parameters:
         - name: page
           in: query
@@ -224,6 +259,12 @@ paths:
           description: Partial name search (case-insensitive)
           schema:
             type: string
+        - name: onlyFavourites
+          in: query
+          description: When "true", only return favourited organisations
+          schema:
+            type: string
+            enum: ["true"]
       responses:
         "200":
           description: Paginated list
@@ -235,15 +276,24 @@ paths:
                   data:
                     type: array
                     items:
-                      $ref: "#/components/schemas/Organisation"
+                      allOf:
+                        - $ref: "#/components/schemas/Organisation"
+                        - type: object
+                          properties:
+                            isFavourite:
+                              type: boolean
                   count:
                     type: integer
         "400":
           $ref: "#/components/responses/ValidationException"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /api/v1/organisations/{id}:
     get:
       summary: Get organisation by ID
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -374,6 +424,8 @@ paths:
 
     get:
       summary: List countries
+      security:
+        - bearerAuth: []
       parameters:
         - name: page
           in: query
@@ -411,6 +463,8 @@ paths:
   /api/v1/countries/{id}:
     get:
       summary: Get country by ID
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -552,6 +606,8 @@ paths:
 
     get:
       summary: List cities
+      security:
+        - bearerAuth: []
       parameters:
         - name: page
           in: query
@@ -595,6 +651,8 @@ paths:
   /api/v1/cities/{id}:
     get:
       summary: Get city by ID
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -741,7 +799,9 @@ paths:
                 code: RESOURCE_NOT_FOUND_EXCEPTION
 
     get:
-      summary: List places (public)
+      summary: List places
+      security:
+        - bearerAuth: []
       parameters:
         - name: page
           in: query
@@ -765,6 +825,12 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: onlyFavourites
+          in: query
+          description: When "true", only return favourited places
+          schema:
+            type: string
+            enum: ["true"]
       responses:
         "200":
           description: Paginated list
@@ -776,15 +842,24 @@ paths:
                   data:
                     type: array
                     items:
-                      $ref: "#/components/schemas/Place"
+                      allOf:
+                        - $ref: "#/components/schemas/Place"
+                        - type: object
+                          properties:
+                            isFavourite:
+                              type: boolean
                   count:
                     type: integer
         "400":
           $ref: "#/components/responses/ValidationException"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /api/v1/places/{id}:
     get:
       summary: Get place by ID
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -944,6 +1019,8 @@ paths:
 
     get:
       summary: List events
+      security:
+        - bearerAuth: []
       parameters:
         - name: page
           in: query
@@ -956,6 +1033,11 @@ paths:
             type: integer
             default: 20
             maximum: 100
+        - name: search
+          in: query
+          description: Search by event title, place name, or organisation name (case-insensitive)
+          schema:
+            type: string
       responses:
         "200":
           description: Paginated list of events
@@ -976,6 +1058,8 @@ paths:
   /api/v1/events/area:
     get:
       summary: Get events within a geographic area (max 10x10 km)
+      security:
+        - bearerAuth: []
       parameters:
         - name: minLat
           in: query
@@ -1037,6 +1121,8 @@ paths:
   /api/v1/events/{id}:
     get:
       summary: Get event by ID
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -1142,6 +1228,8 @@ paths:
   /api/v1/places/{placeId}/events:
     get:
       summary: List events for a place
+      security:
+        - bearerAuth: []
       parameters:
         - name: placeId
           in: path
@@ -1180,6 +1268,8 @@ paths:
   /api/v1/organisations/{organisationId}/events:
     get:
       summary: List events for an organisation
+      security:
+        - bearerAuth: []
       parameters:
         - name: organisationId
           in: path
@@ -1214,6 +1304,94 @@ paths:
                     type: integer
         "400":
           $ref: "#/components/responses/ValidationException"
+
+  /api/v1/favourite-organisations:
+    post:
+      summary: Add organisation to favourites
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [organisationId]
+              properties:
+                organisationId:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Added (or already exists)
+        "400":
+          $ref: "#/components/responses/ValidationException"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/favourite-organisations/{organisationId}:
+    delete:
+      summary: Remove organisation from favourites
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: organisationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Removed (idempotent)
+        "400":
+          $ref: "#/components/responses/ValidationException"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/favourite-places:
+    post:
+      summary: Add place to favourites
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [placeId]
+              properties:
+                placeId:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Added (or already exists)
+        "400":
+          $ref: "#/components/responses/ValidationException"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/favourite-places/{placeId}:
+    delete:
+      summary: Remove place from favourites
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: placeId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Removed (idempotent)
+        "400":
+          $ref: "#/components/responses/ValidationException"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
 components:
   securitySchemes:
