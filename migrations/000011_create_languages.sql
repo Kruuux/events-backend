@@ -1,0 +1,5 @@
+CREATE TABLE languages (
+  id TEXT PRIMARY KEY,
+  code VARCHAR(10) UNIQUE NOT NULL,
+  name VARCHAR(256) NOT NULL
+);

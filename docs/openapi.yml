@@ -195,6 +195,169 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /api/v1/languages:
+    post:
+      summary: Create language (admin only)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, name]
+              properties:
+                code:
+                  type: string
+                  minLength: 1
+                  maxLength: 10
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 256
+      responses:
+        "201":
+          description: Language created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Language"
+        "400":
+          $ref: "#/components/responses/ValidationException"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Language code already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: LANGUAGE_CODE_ALREADY_EXISTS_EXCEPTION
+
+    get:
+      summary: List all languages (public, no auth required)
+      responses:
+        "200":
+          description: Array of languages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Language"
+
+  /api/v1/languages/{id}:
+    get:
+      summary: Get language by ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Language found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Language"
+        "400":
+          $ref: "#/components/responses/ValidationException"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    put:
+      summary: Update language (admin only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, name]
+              properties:
+                code:
+                  type: string
+                  minLength: 1
+                  maxLength: 10
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 256
+      responses:
+        "200":
+          description: Language updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Language"
+        "400":
+          $ref: "#/components/responses/ValidationException"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Language code already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: LANGUAGE_CODE_ALREADY_EXISTS_EXCEPTION
+
+    delete:
+      summary: Delete language (admin only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Language deleted
+        "400":
+          $ref: "#/components/responses/ValidationException"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Language has dependent translations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: LANGUAGE_HAS_DEPENDENCIES_EXCEPTION
+
   /api/v1/organisations:
     post:
       summary: Create organisation (admin only)
@@ -386,18 +549,21 @@ paths:
       summary: Create country (admin only)
       security:
         - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AcceptLanguage"
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [name]
+              required: [translations]
               properties:
-                name:
-                  type: string
-                  minLength: 1
-                  maxLength: 256
+                translations:
+                  type: array
+                  minItems: 1
+                  items:
+                    $ref: "#/components/schemas/TranslationName"
       responses:
         "201":
           description: Country created
@@ -411,20 +577,13 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
-        "409":
-          description: Name already taken
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorCode"
-              example:
-                code: COUNTRY_NAME_ALREADY_TAKEN_EXCEPTION
 
     get:
       summary: List countries
       security:
         - bearerAuth: []
       parameters:
+        - $ref: "#/components/parameters/AcceptLanguage"
         - name: page
           in: query
           schema:
@@ -438,7 +597,7 @@ paths:
             maximum: 100
         - name: name
           in: query
-          description: Partial name search (case-insensitive)
+          description: Partial name search (case-insensitive, searches translated name)
           schema:
             type: string
       responses:
@@ -472,13 +631,28 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/AcceptLanguage"
+        - name: allTranslations
+          in: query
+          description: When "true", includes a translations array with all language variants
+          schema:
+            type: string
+            enum: ["true"]
       responses:
         "200":
           description: Country found
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Country"
+                allOf:
+                  - $ref: "#/components/schemas/Country"
+                  - type: object
+                    properties:
+                      translations:
+                        description: Only present when allTranslations=true
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/TranslationName"
         "400":
           $ref: "#/components/responses/ValidationException"
         "401":
@@ -497,18 +671,20 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/AcceptLanguage"
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [name]
+              required: [translations]
               properties:
-                name:
-                  type: string
-                  minLength: 1
-                  maxLength: 256
+                translations:
+                  type: array
+                  minItems: 1
+                  items:
+                    $ref: "#/components/schemas/TranslationName"
       responses:
         "200":
           description: Country updated
@@ -524,14 +700,6 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-        "409":
-          description: Name already taken
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorCode"
-              example:
-                code: COUNTRY_NAME_ALREADY_TAKEN_EXCEPTION
 
     delete:
       summary: Delete country (admin only)
@@ -569,18 +737,21 @@ paths:
       summary: Create city (admin only)
       security:
         - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AcceptLanguage"
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [name, countryId]
+              required: [translations, countryId]
               properties:
-                name:
-                  type: string
-                  minLength: 1
-                  maxLength: 256
+                translations:
+                  type: array
+                  minItems: 1
+                  items:
+                    $ref: "#/components/schemas/TranslationName"
                 countryId:
                   type: string
                   format: uuid
@@ -611,6 +782,7 @@ paths:
       security:
         - bearerAuth: []
       parameters:
+        - $ref: "#/components/parameters/AcceptLanguage"
         - name: page
           in: query
           schema:
@@ -624,7 +796,7 @@ paths:
             maximum: 100
         - name: name
           in: query
-          description: Partial name search (case-insensitive)
+          description: Partial name search (case-insensitive, searches translated name)
           schema:
             type: string
         - name: countryId
@@ -664,13 +836,28 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/AcceptLanguage"
+        - name: allTranslations
+          in: query
+          description: When "true", includes a translations array with all language variants
+          schema:
+            type: string
+            enum: ["true"]
       responses:
         "200":
           description: City found with country name
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/City"
+                allOf:
+                  - $ref: "#/components/schemas/City"
+                  - type: object
+                    properties:
+                      translations:
+                        description: Only present when allTranslations=true
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/TranslationName"
         "400":
           $ref: "#/components/responses/ValidationException"
         "401":
@@ -689,18 +876,20 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/AcceptLanguage"
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [name, countryId]
+              required: [translations, countryId]
               properties:
-                name:
-                  type: string
-                  minLength: 1
-                  maxLength: 256
+                translations:
+                  type: array
+                  minItems: 1
+                  items:
+                    $ref: "#/components/schemas/TranslationName"
                 countryId:
                   type: string
                   format: uuid
@@ -809,6 +998,7 @@ paths:
       security:
         - bearerAuth: []
       parameters:
+        - $ref: "#/components/parameters/AcceptLanguage"
         - name: page
           in: query
           schema:
@@ -873,6 +1063,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/AcceptLanguage"
       responses:
         "200":
           description: Place found with city and country names
@@ -976,20 +1167,21 @@ paths:
       summary: Create event (admin only)
       security:
         - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AcceptLanguage"
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [title, description, placeId, startDate, endDate]
+              required: [translations, placeId, startDate, endDate]
               properties:
-                title:
-                  type: string
-                  minLength: 1
-                  maxLength: 256
-                description:
-                  type: string
+                translations:
+                  type: array
+                  minItems: 1
+                  items:
+                    $ref: "#/components/schemas/EventTranslation"
                 placeId:
                   type: string
                   format: uuid
@@ -1035,6 +1227,7 @@ paths:
       security:
         - bearerAuth: []
       parameters:
+        - $ref: "#/components/parameters/AcceptLanguage"
         - name: page
           in: query
           schema:
@@ -1082,6 +1275,7 @@ paths:
       security:
         - bearerAuth: []
       parameters:
+        - $ref: "#/components/parameters/AcceptLanguage"
         - name: minLat
           in: query
           required: true
@@ -1153,13 +1347,28 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/AcceptLanguage"
+        - name: allTranslations
+          in: query
+          description: When "true", includes a translations array with all language variants
+          schema:
+            type: string
+            enum: ["true"]
       responses:
         "200":
           description: Event found
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Event"
+                allOf:
+                  - $ref: "#/components/schemas/Event"
+                  - type: object
+                    properties:
+                      translations:
+                        description: Only present when allTranslations=true
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/EventTranslation"
         "400":
           $ref: "#/components/responses/ValidationException"
         "401":
@@ -1178,20 +1387,20 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/AcceptLanguage"
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [title, description, placeId, startDate, endDate]
+              required: [translations, placeId, startDate, endDate]
               properties:
-                title:
-                  type: string
-                  minLength: 1
-                  maxLength: 256
-                description:
-                  type: string
+                translations:
+                  type: array
+                  minItems: 1
+                  items:
+                    $ref: "#/components/schemas/EventTranslation"
                 placeId:
                   type: string
                   format: uuid
@@ -1267,6 +1476,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/AcceptLanguage"
         - name: page
           in: query
           schema:
@@ -1309,6 +1519,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/AcceptLanguage"
         - name: page
           in: query
           schema:
@@ -1344,18 +1555,21 @@ paths:
       summary: Create tag (admin only)
       security:
         - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AcceptLanguage"
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [name]
+              required: [translations]
               properties:
-                name:
-                  type: string
-                  minLength: 1
-                  maxLength: 256
+                translations:
+                  type: array
+                  minItems: 1
+                  items:
+                    $ref: "#/components/schemas/TranslationName"
       responses:
         "201":
           description: Tag created
@@ -1369,20 +1583,13 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
-        "409":
-          description: Name already taken
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorCode"
-              example:
-                code: TAG_NAME_ALREADY_TAKEN_EXCEPTION
 
     get:
       summary: List tags
       security:
         - bearerAuth: []
       parameters:
+        - $ref: "#/components/parameters/AcceptLanguage"
         - name: page
           in: query
           schema:
@@ -1396,7 +1603,7 @@ paths:
             maximum: 100
         - name: name
           in: query
-          description: Partial name search (case-insensitive)
+          description: Partial name search (case-insensitive, searches translated name)
           schema:
             type: string
       responses:
@@ -1430,13 +1637,28 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/AcceptLanguage"
+        - name: allTranslations
+          in: query
+          description: When "true", includes a translations array with all language variants
+          schema:
+            type: string
+            enum: ["true"]
       responses:
         "200":
           description: Tag found
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Tag"
+                allOf:
+                  - $ref: "#/components/schemas/Tag"
+                  - type: object
+                    properties:
+                      translations:
+                        description: Only present when allTranslations=true
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/TranslationName"
         "400":
           $ref: "#/components/responses/ValidationException"
         "401":
@@ -1455,18 +1677,20 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/AcceptLanguage"
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [name]
+              required: [translations]
               properties:
-                name:
-                  type: string
-                  minLength: 1
-                  maxLength: 256
+                translations:
+                  type: array
+                  minItems: 1
+                  items:
+                    $ref: "#/components/schemas/TranslationName"
       responses:
         "200":
           description: Tag updated
@@ -1482,14 +1706,6 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-        "409":
-          description: Name already taken
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorCode"
-              example:
-                code: TAG_NAME_ALREADY_TAKEN_EXCEPTION
 
     delete:
       summary: Delete tag (admin only)
@@ -1609,6 +1825,19 @@ components:
       scheme: bearer
       bearerFormat: JWT
 
+  parameters:
+    AcceptLanguage:
+      name: Accept-Language
+      in: header
+      description: >
+        Language preference for translated fields. Supports standard Accept-Language
+        syntax with quality values (e.g., "en-US,en;q=0.9,pl;q=0.8"). The server
+        resolves the best matching language from the languages table. Falls back to
+        English or the first available language if no match is found.
+      schema:
+        type: string
+      example: "en-US,en;q=0.9,pl;q=0.8"
+
   schemas:
     ErrorCode:
       type: object
@@ -1623,6 +1852,45 @@ components:
         accessToken:
           type: string
         refreshToken:
+          type: string
+
+    Language:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          description: Language code (e.g., "en", "pl")
+        name:
+          type: string
+          description: Human-readable language name (e.g., "English", "Polish")
+
+    TranslationName:
+      type: object
+      required: [languageCode, name]
+      properties:
+        languageCode:
+          type: string
+          description: Language code matching a language in the languages table
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+
+    EventTranslation:
+      type: object
+      required: [languageCode, title, description]
+      properties:
+        languageCode:
+          type: string
+          description: Language code matching a language in the languages table
+        title:
+          type: string
+          minLength: 1
+          maxLength: 256
+        description:
           type: string
 
     Organisation:
@@ -1648,6 +1916,7 @@ components:
           format: uuid
         name:
           type: string
+          description: Translated name based on Accept-Language header
         createdAt:
           type: string
           format: date-time
@@ -1667,6 +1936,7 @@ components:
           format: uuid
         name:
           type: string
+          description: Translated name based on Accept-Language header
         createdAt:
           type: string
           format: date-time
@@ -1682,6 +1952,7 @@ components:
           properties:
             countryName:
               type: string
+              description: Translated country name based on Accept-Language header
 
     PlaceBase:
       description: Place as returned by create/update (without joined city/country names)
@@ -1716,8 +1987,10 @@ components:
           properties:
             cityName:
               type: string
+              description: Translated city name based on Accept-Language header
             countryName:
               type: string
+              description: Translated country name based on Accept-Language header
 
     Tag:
       type: object
@@ -1730,6 +2003,7 @@ components:
           format: uuid
         name:
           type: string
+          description: Translated name based on Accept-Language header
         createdAt:
           type: string
           format: date-time
@@ -1753,8 +2027,10 @@ components:
           format: uuid
         title:
           type: string
+          description: Translated title based on Accept-Language header
         description:
           type: string
+          description: Translated description based on Accept-Language header
         startDate:
           type: string
           format: date-time

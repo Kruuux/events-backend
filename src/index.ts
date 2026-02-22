@@ -80,6 +80,35 @@ function authenticate(req: Request): jwt.JwtPayload | null {
   }
 }
 
+function parseAcceptLanguage(header: string): string[] {
+  return header
+    .split(',')
+    .map((part) => {
+      const [locale, ...params] = part.trim().split(';');
+      const qParam = params.find((p) => p.trim().startsWith('q='));
+      const q = qParam ? parseFloat(qParam.trim().slice(2)) : 1;
+      return { code: locale!.trim().split('-')[0]!.toLowerCase(), q };
+    })
+    .sort((a, b) => b.q - a.q)
+    .map((entry) => entry.code);
+}
+
+async function resolveLanguageId(req: Request): Promise<string | null> {
+  const header = req.headers['accept-language'];
+  const allLangs = await pool.query('SELECT id, code FROM languages');
+  if (allLangs.rows.length === 0) return null;
+  const langMap = new Map(
+    allLangs.rows.map((r) => [r.code as string, r.id as string]),
+  );
+  if (!header) return langMap.get('en') ?? (allLangs.rows[0]!.id as string);
+  const preferred = parseAcceptLanguage(header as string);
+  for (const code of preferred) {
+    const id = langMap.get(code);
+    if (id) return id;
+  }
+  return langMap.get('en') ?? (allLangs.rows[0]!.id as string);
+}
+
 const UuidSchema = v.pipe(v.string(), v.uuid());
 
 const IdParamSchema = v.object({
@@ -396,7 +425,8 @@ app.get('/api/v1/organisations', async (req: Request, res: Response) => {
     conditions.push('fo.human_id IS NOT NULL');
   }
 
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const where =
+    conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const countConditions: string[] = [];
   let ci = 2;
   if (query.name) {
@@ -406,7 +436,8 @@ app.get('/api/v1/organisations', async (req: Request, res: Response) => {
   if (query.onlyFavourites === 'true') {
     countConditions.push('fo.human_id IS NOT NULL');
   }
-  const countWhere = countConditions.length > 0 ? `WHERE ${countConditions.join(' AND ')}` : '';
+  const countWhere =
+    countConditions.length > 0 ? `WHERE ${countConditions.join(' AND ')}` : '';
 
   const [countResult, rows] = await Promise.all([
     pool.query(
@@ -529,8 +560,13 @@ app.delete('/api/v1/organisations/:id', async (req: Request, res: Response) => {
 
 // --- tags ---
 
-const CreateTagSchema = v.object({
+const TranslationNameSchema = v.object({
+  languageCode: v.pipe(v.string(), v.minLength(1)),
   name: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
+});
+
+const CreateTagSchema = v.object({
+  translations: v.pipe(v.array(TranslationNameSchema), v.minLength(1)),
 });
 
 app.post('/api/v1/tags', async (req: Request, res: Response) => {
@@ -547,21 +583,46 @@ app.post('/api/v1/tags', async (req: Request, res: Response) => {
   const data = validate(CreateTagSchema, req.body, res);
   if (!data) return;
 
-  const nameCheck = await pool.query(
-    'SELECT id FROM tags WHERE name = $1',
-    [data.name],
+  const langCodes = data.translations.map((t) => t.languageCode);
+  const langResult = await pool.query(
+    'SELECT id, code FROM languages WHERE code = ANY($1)',
+    [langCodes],
   );
-  if (nameCheck.rows.length > 0) {
-    res.status(409).json({ code: 'TAG_NAME_ALREADY_TAKEN_EXCEPTION' });
+  if (langResult.rows.length !== langCodes.length) {
+    res
+      .status(400)
+      .json({
+        code: 'VALIDATION_EXCEPTION',
+        violations: [
+          { property: 'translations', message: 'Invalid language code' },
+        ],
+      });
     return;
   }
+  const langMap = new Map(
+    langResult.rows.map((r) => [r.code as string, r.id as string]),
+  );
 
+  const langId = await resolveLanguageId(req);
   const tagId = crypto.randomUUID();
+  await pool.query('INSERT INTO tags (id, human_id) VALUES ($1, $2)', [
+    tagId,
+    payload.sub,
+  ]);
+
+  for (const t of data.translations) {
+    await pool.query(
+      'INSERT INTO tag_translations (id, tag_id, language_id, name) VALUES ($1, $2, $3, $4)',
+      [crypto.randomUUID(), tagId, langMap.get(t.languageCode), t.name],
+    );
+  }
+
   const row = await pool.query(
-    `INSERT INTO tags (id, human_id, name)
-     VALUES ($1, $2, $3)
-     RETURNING id, human_id AS "humanId", name, created_at AS "createdAt"`,
-    [tagId, payload.sub, data.name],
+    `SELECT t.id, t.human_id AS "humanId", COALESCE(tt.name, (SELECT tt2.name FROM tag_translations tt2 WHERE tt2.tag_id = t.id LIMIT 1)) AS name, t.created_at AS "createdAt"
+     FROM tags t
+     LEFT JOIN tag_translations tt ON tt.tag_id = t.id AND tt.language_id = $2
+     WHERE t.id = $1`,
+    [tagId, langId],
   );
 
   res.status(201).json(row.rows[0]);
@@ -583,20 +644,52 @@ app.get('/api/v1/tags', async (req: Request, res: Response) => {
   const query = validate(TagListSchema, req.query, res);
   if (!query) return;
 
+  const langId = await resolveLanguageId(req);
   const page = Math.max(1, Number(query.page));
   const limit = Math.min(100, Math.max(1, Number(query.limit)));
   const offset = (page - 1) * limit;
 
-  const where = query.name ? `WHERE name ILIKE '%' || $3 || '%'` : '';
-  const params = query.name ? [limit, offset, query.name] : [limit, offset];
-  const countParams = query.name ? [query.name] : [];
-  const countWhere = query.name ? `WHERE name ILIKE '%' || $1 || '%'` : '';
+  const conditions: string[] = [];
+  const params: unknown[] = [limit, offset, langId];
+  const countParams: unknown[] = [langId];
+  let paramIdx = 4;
+  let countIdx = 2;
+
+  if (query.name) {
+    conditions.push(
+      `COALESCE(tt.name, (SELECT tt2.name FROM tag_translations tt2 WHERE tt2.tag_id = t.id LIMIT 1)) ILIKE '%' || $${paramIdx} || '%'`,
+    );
+    params.push(query.name);
+    countParams.push(query.name);
+    paramIdx++;
+    countIdx++;
+  }
+
+  const where =
+    conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const countConditions: string[] = [];
+  let ci = 2;
+  if (query.name) {
+    countConditions.push(
+      `COALESCE(tt.name, (SELECT tt2.name FROM tag_translations tt2 WHERE tt2.tag_id = t.id LIMIT 1)) ILIKE '%' || $${ci} || '%'`,
+    );
+    ci++;
+  }
+  const countWhere =
+    countConditions.length > 0 ? `WHERE ${countConditions.join(' AND ')}` : '';
 
   const [countResult, rows] = await Promise.all([
-    pool.query(`SELECT COUNT(*) FROM tags ${countWhere}`, countParams),
     pool.query(
-      `SELECT id, human_id AS "humanId", name, created_at AS "createdAt"
-       FROM tags ${where} ORDER BY name ASC LIMIT $1 OFFSET $2`,
+      `SELECT COUNT(*) FROM tags t
+       LEFT JOIN tag_translations tt ON tt.tag_id = t.id AND tt.language_id = $1
+       ${countWhere}`,
+      countParams,
+    ),
+    pool.query(
+      `SELECT t.id, t.human_id AS "humanId", COALESCE(tt.name, (SELECT tt2.name FROM tag_translations tt2 WHERE tt2.tag_id = t.id LIMIT 1)) AS name, t.created_at AS "createdAt"
+       FROM tags t
+       LEFT JOIN tag_translations tt ON tt.tag_id = t.id AND tt.language_id = $3
+       ${where} ORDER BY name ASC LIMIT $1 OFFSET $2`,
       params,
     ),
   ]);
@@ -615,10 +708,13 @@ app.get('/api/v1/tags/:id', async (req: Request, res: Response) => {
   const params = validate(IdParamSchema, req.params, res);
   if (!params) return;
 
+  const langId = await resolveLanguageId(req);
   const row = await pool.query(
-    `SELECT id, human_id AS "humanId", name, created_at AS "createdAt"
-     FROM tags WHERE id = $1`,
-    [params.id],
+    `SELECT t.id, t.human_id AS "humanId", COALESCE(tt.name, (SELECT tt2.name FROM tag_translations tt2 WHERE tt2.tag_id = t.id LIMIT 1)) AS name, t.created_at AS "createdAt"
+     FROM tags t
+     LEFT JOIN tag_translations tt ON tt.tag_id = t.id AND tt.language_id = $2
+     WHERE t.id = $1`,
+    [params.id, langId],
   );
 
   if (row.rows.length === 0) {
@@ -626,20 +722,25 @@ app.get('/api/v1/tags/:id', async (req: Request, res: Response) => {
     return;
   }
 
-  res.status(200).json(row.rows[0]);
+  const result = row.rows[0]!;
+  if (req.query.allTranslations === 'true') {
+    const translations = await pool.query(
+      `SELECT l.code AS "languageCode", tt.name FROM tag_translations tt JOIN languages l ON l.id = tt.language_id WHERE tt.tag_id = $1`,
+      [params.id],
+    );
+    (result as Record<string, unknown>).translations = translations.rows;
+  }
+
+  res.status(200).json(result);
 });
 
 const UpdateTagSchema = v.object({
   id: UuidSchema,
-  name: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
+  translations: v.pipe(v.array(TranslationNameSchema), v.minLength(1)),
 });
 
 app.put('/api/v1/tags/:id', async (req: Request, res: Response) => {
-  const data = validate(
-    UpdateTagSchema,
-    { ...req.params, ...req.body },
-    res,
-  );
+  const data = validate(UpdateTagSchema, { ...req.params, ...req.body }, res);
   if (!data) return;
 
   const payload = authenticate(req);
@@ -652,25 +753,50 @@ app.put('/api/v1/tags/:id', async (req: Request, res: Response) => {
     return;
   }
 
-  const nameCheck = await pool.query(
-    'SELECT id FROM tags WHERE name = $1 AND id != $2',
-    [data.name, data.id],
-  );
-  if (nameCheck.rows.length > 0) {
-    res.status(409).json({ code: 'TAG_NAME_ALREADY_TAKEN_EXCEPTION' });
-    return;
-  }
-
-  const row = await pool.query(
-    `UPDATE tags SET name = $1 WHERE id = $2
-     RETURNING id, human_id AS "humanId", name, created_at AS "createdAt"`,
-    [data.name, data.id],
-  );
-
-  if (row.rows.length === 0) {
+  const existing = await pool.query('SELECT id FROM tags WHERE id = $1', [
+    data.id,
+  ]);
+  if (existing.rows.length === 0) {
     res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
     return;
   }
+
+  const langCodes = data.translations.map((t) => t.languageCode);
+  const langResult = await pool.query(
+    'SELECT id, code FROM languages WHERE code = ANY($1)',
+    [langCodes],
+  );
+  if (langResult.rows.length !== langCodes.length) {
+    res
+      .status(400)
+      .json({
+        code: 'VALIDATION_EXCEPTION',
+        violations: [
+          { property: 'translations', message: 'Invalid language code' },
+        ],
+      });
+    return;
+  }
+  const langMap = new Map(
+    langResult.rows.map((r) => [r.code as string, r.id as string]),
+  );
+
+  await pool.query('DELETE FROM tag_translations WHERE tag_id = $1', [data.id]);
+  for (const t of data.translations) {
+    await pool.query(
+      'INSERT INTO tag_translations (id, tag_id, language_id, name) VALUES ($1, $2, $3, $4)',
+      [crypto.randomUUID(), data.id, langMap.get(t.languageCode), t.name],
+    );
+  }
+
+  const langId = await resolveLanguageId(req);
+  const row = await pool.query(
+    `SELECT t.id, t.human_id AS "humanId", COALESCE(tt.name, (SELECT tt2.name FROM tag_translations tt2 WHERE tt2.tag_id = t.id LIMIT 1)) AS name, t.created_at AS "createdAt"
+     FROM tags t
+     LEFT JOIN tag_translations tt ON tt.tag_id = t.id AND tt.language_id = $2
+     WHERE t.id = $1`,
+    [data.id, langId],
+  );
 
   res.status(200).json(row.rows[0]);
 });
@@ -689,8 +815,79 @@ app.delete('/api/v1/tags/:id', async (req: Request, res: Response) => {
     return;
   }
 
+  const row = await pool.query('DELETE FROM tags WHERE id = $1 RETURNING id', [
+    params.id,
+  ]);
+
+  if (row.rows.length === 0) {
+    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+    return;
+  }
+
+  res.status(200).end();
+});
+
+// --- languages ---
+
+const CreateLanguageSchema = v.object({
+  code: v.pipe(v.string(), v.minLength(1), v.maxLength(10)),
+  name: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
+});
+
+app.post('/api/v1/languages', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+  if (payload.role !== 'admin') {
+    res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
+    return;
+  }
+
+  const data = validate(CreateLanguageSchema, req.body, res);
+  if (!data) return;
+
+  const codeCheck = await pool.query(
+    'SELECT id FROM languages WHERE code = $1',
+    [data.code],
+  );
+  if (codeCheck.rows.length > 0) {
+    res.status(409).json({ code: 'LANGUAGE_CODE_ALREADY_TAKEN_EXCEPTION' });
+    return;
+  }
+
+  const id = crypto.randomUUID();
   const row = await pool.query(
-    'DELETE FROM tags WHERE id = $1 RETURNING id',
+    `INSERT INTO languages (id, code, name)
+     VALUES ($1, $2, $3)
+     RETURNING id, code, name`,
+    [id, data.code, data.name],
+  );
+
+  res.status(201).json(row.rows[0]);
+});
+
+app.get('/api/v1/languages', async (_req: Request, res: Response) => {
+  const rows = await pool.query(
+    'SELECT id, code, name FROM languages ORDER BY code ASC',
+  );
+
+  res.status(200).json(rows.rows);
+});
+
+app.get('/api/v1/languages/:id', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+
+  const params = validate(IdParamSchema, req.params, res);
+  if (!params) return;
+
+  const row = await pool.query(
+    'SELECT id, code, name FROM languages WHERE id = $1',
     [params.id],
   );
 
@@ -699,7 +896,92 @@ app.delete('/api/v1/tags/:id', async (req: Request, res: Response) => {
     return;
   }
 
-  res.status(200).end();
+  res.status(200).json(row.rows[0]);
+});
+
+const UpdateLanguageSchema = v.object({
+  id: UuidSchema,
+  code: v.pipe(v.string(), v.minLength(1), v.maxLength(10)),
+  name: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
+});
+
+app.put('/api/v1/languages/:id', async (req: Request, res: Response) => {
+  const data = validate(
+    UpdateLanguageSchema,
+    { ...req.params, ...req.body },
+    res,
+  );
+  if (!data) return;
+
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+  if (payload.role !== 'admin') {
+    res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
+    return;
+  }
+
+  const codeCheck = await pool.query(
+    'SELECT id FROM languages WHERE code = $1 AND id != $2',
+    [data.code, data.id],
+  );
+  if (codeCheck.rows.length > 0) {
+    res.status(409).json({ code: 'LANGUAGE_CODE_ALREADY_TAKEN_EXCEPTION' });
+    return;
+  }
+
+  const row = await pool.query(
+    `UPDATE languages SET code = $1, name = $2 WHERE id = $3
+     RETURNING id, code, name`,
+    [data.code, data.name, data.id],
+  );
+
+  if (row.rows.length === 0) {
+    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+    return;
+  }
+
+  res.status(200).json(row.rows[0]);
+});
+
+app.delete('/api/v1/languages/:id', async (req: Request, res: Response) => {
+  const params = validate(IdParamSchema, req.params, res);
+  if (!params) return;
+
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+  if (payload.role !== 'admin') {
+    res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
+    return;
+  }
+
+  try {
+    const row = await pool.query(
+      'DELETE FROM languages WHERE id = $1 RETURNING id',
+      [params.id],
+    );
+
+    if (row.rows.length === 0) {
+      res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+      return;
+    }
+
+    res.status(200).end();
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      err.message.includes('violates foreign key constraint')
+    ) {
+      res.status(409).json({ code: 'LANGUAGE_HAS_DEPENDENCIES_EXCEPTION' });
+      return;
+    }
+    throw err;
+  }
 });
 
 app.get(
@@ -715,6 +997,7 @@ app.get(
     const query = validate(PaginationSchema, req.query, res);
     if (!query) return;
 
+    const langId = await resolveLanguageId(req);
     const page = Math.max(1, Number(query.page));
     const limit = Math.min(100, Math.max(1, Number(query.limit)));
     const offset = (page - 1) * limit;
@@ -725,20 +1008,23 @@ app.get(
       ]),
       pool.query(
         `SELECT e.id, e.human_id AS "humanId", e.organisation_id AS "organisationId",
-                e.place_id AS "placeId", e.title, e.description,
+                e.place_id AS "placeId",
+                COALESCE(et_tr.title, (SELECT et2.title FROM event_translations et2 WHERE et2.event_id = e.id LIMIT 1)) AS title,
+                COALESCE(et_tr.description, (SELECT et2.description FROM event_translations et2 WHERE et2.event_id = e.id LIMIT 1)) AS description,
                 p.latitude, p.longitude, p.name AS "placeName", p.address AS "placeAddress",
                 e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
                 o.name AS "organisationName",
-                COALESCE((SELECT json_agg(json_build_object('id', tg.id, 'name', tg.name)) FROM event_tags et JOIN tags tg ON tg.id = et.tag_id WHERE et.event_id = e.id), '[]'::json) AS "tags"
+                COALESCE((SELECT json_agg(json_build_object('id', tg.id, 'name', COALESCE(tgt.name, (SELECT tgt2.name FROM tag_translations tgt2 WHERE tgt2.tag_id = tg.id LIMIT 1)))) FROM event_tags etg JOIN tags tg ON tg.id = etg.tag_id LEFT JOIN tag_translations tgt ON tgt.tag_id = tg.id AND tgt.language_id = $4 WHERE etg.event_id = e.id), '[]'::json) AS "tags"
          FROM events e
          JOIN places p ON p.id = e.place_id
          LEFT JOIN organisations o ON o.id = e.organisation_id
+         LEFT JOIN event_translations et_tr ON et_tr.event_id = e.id AND et_tr.language_id = $4
          WHERE e.organisation_id = $1
          ORDER BY CASE WHEN e.start_date >= CURRENT_DATE THEN 0 ELSE 1 END,
                   CASE WHEN e.start_date >= CURRENT_DATE THEN e.start_date END ASC,
                   CASE WHEN e.start_date < CURRENT_DATE THEN e.start_date END DESC
          LIMIT $2 OFFSET $3`,
-        [organisationId, limit, offset],
+        [organisationId, limit, offset, langId],
       ),
     ]);
 
@@ -747,55 +1033,62 @@ app.get(
   },
 );
 
-app.get('/api/v1/places/:placeId/events', async (req: Request, res: Response) => {
-  const payload = authenticate(req);
-  if (!payload) {
-    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
-    return;
-  }
+app.get(
+  '/api/v1/places/:placeId/events',
+  async (req: Request, res: Response) => {
+    const payload = authenticate(req);
+    if (!payload) {
+      res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+      return;
+    }
 
-  const placeId = req.params.placeId;
-  const query = validate(PaginationSchema, req.query, res);
-  if (!query) return;
+    const placeId = req.params.placeId;
+    const query = validate(PaginationSchema, req.query, res);
+    if (!query) return;
 
-  const page = Math.max(1, Number(query.page));
-  const limit = Math.min(100, Math.max(1, Number(query.limit)));
-  const offset = (page - 1) * limit;
+    const langId = await resolveLanguageId(req);
+    const page = Math.max(1, Number(query.page));
+    const limit = Math.min(100, Math.max(1, Number(query.limit)));
+    const offset = (page - 1) * limit;
 
-  const [countResult, rows] = await Promise.all([
-    pool.query('SELECT COUNT(*) FROM events WHERE place_id = $1', [placeId]),
-    pool.query(
-      `SELECT e.id, e.human_id AS "humanId", e.organisation_id AS "organisationId",
-                e.place_id AS "placeId", e.title, e.description,
+    const [countResult, rows] = await Promise.all([
+      pool.query('SELECT COUNT(*) FROM events WHERE place_id = $1', [placeId]),
+      pool.query(
+        `SELECT e.id, e.human_id AS "humanId", e.organisation_id AS "organisationId",
+                e.place_id AS "placeId",
+                COALESCE(et_tr.title, (SELECT et2.title FROM event_translations et2 WHERE et2.event_id = e.id LIMIT 1)) AS title,
+                COALESCE(et_tr.description, (SELECT et2.description FROM event_translations et2 WHERE et2.event_id = e.id LIMIT 1)) AS description,
                 p.latitude, p.longitude, p.name AS "placeName", p.address AS "placeAddress",
                 e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
                 o.name AS "organisationName",
-                COALESCE((SELECT json_agg(json_build_object('id', tg.id, 'name', tg.name)) FROM event_tags et JOIN tags tg ON tg.id = et.tag_id WHERE et.event_id = e.id), '[]'::json) AS "tags"
+                COALESCE((SELECT json_agg(json_build_object('id', tg.id, 'name', COALESCE(tgt.name, (SELECT tgt2.name FROM tag_translations tgt2 WHERE tgt2.tag_id = tg.id LIMIT 1)))) FROM event_tags etg JOIN tags tg ON tg.id = etg.tag_id LEFT JOIN tag_translations tgt ON tgt.tag_id = tg.id AND tgt.language_id = $4 WHERE etg.event_id = e.id), '[]'::json) AS "tags"
          FROM events e
          JOIN places p ON p.id = e.place_id
          LEFT JOIN organisations o ON o.id = e.organisation_id
+         LEFT JOIN event_translations et_tr ON et_tr.event_id = e.id AND et_tr.language_id = $4
          WHERE e.place_id = $1
          ORDER BY CASE WHEN e.start_date >= CURRENT_DATE THEN 0 ELSE 1 END,
                   CASE WHEN e.start_date >= CURRENT_DATE THEN e.start_date END ASC,
                   CASE WHEN e.start_date < CURRENT_DATE THEN e.start_date END DESC
          LIMIT $2 OFFSET $3`,
-      [placeId, limit, offset],
-    ),
-  ]);
+        [placeId, limit, offset, langId],
+      ),
+    ]);
 
-  const total = Number(countResult.rows[0]!.count);
-  res.status(200).json({ data: rows.rows, count: total });
-});
+    const total = Number(countResult.rows[0]!.count);
+    res.status(200).json({ data: rows.rows, count: total });
+  },
+);
 
 // --- countries ---
 
 const CreateCountrySchema = v.object({
-  name: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
+  translations: v.pipe(v.array(TranslationNameSchema), v.minLength(1)),
 });
 
 const UpdateCountrySchema = v.object({
   id: UuidSchema,
-  name: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
+  translations: v.pipe(v.array(TranslationNameSchema), v.minLength(1)),
 });
 
 app.post('/api/v1/countries', async (req: Request, res: Response) => {
@@ -812,21 +1105,43 @@ app.post('/api/v1/countries', async (req: Request, res: Response) => {
   const data = validate(CreateCountrySchema, req.body, res);
   if (!data) return;
 
-  const nameCheck = await pool.query(
-    'SELECT id FROM countries WHERE name = $1',
-    [data.name],
+  const langCodes = data.translations.map((t) => t.languageCode);
+  const langResult = await pool.query(
+    'SELECT id, code FROM languages WHERE code = ANY($1)',
+    [langCodes],
   );
-  if (nameCheck.rows.length > 0) {
-    res.status(409).json({ code: 'COUNTRY_NAME_ALREADY_TAKEN_EXCEPTION' });
+  if (langResult.rows.length !== langCodes.length) {
+    res
+      .status(400)
+      .json({
+        code: 'VALIDATION_EXCEPTION',
+        violations: [
+          { property: 'translations', message: 'Invalid language code' },
+        ],
+      });
     return;
   }
+  const langMap = new Map(
+    langResult.rows.map((r) => [r.code as string, r.id as string]),
+  );
 
+  const langId = await resolveLanguageId(req);
   const id = crypto.randomUUID();
+  await pool.query('INSERT INTO countries (id) VALUES ($1)', [id]);
+
+  for (const t of data.translations) {
+    await pool.query(
+      'INSERT INTO country_translations (id, country_id, language_id, name) VALUES ($1, $2, $3, $4)',
+      [crypto.randomUUID(), id, langMap.get(t.languageCode), t.name],
+    );
+  }
+
   const row = await pool.query(
-    `INSERT INTO countries (id, name)
-     VALUES ($1, $2)
-     RETURNING id, name, created_at AS "createdAt", updated_at AS "updatedAt"`,
-    [id, data.name],
+    `SELECT c.id, COALESCE(ct.name, (SELECT ct2.name FROM country_translations ct2 WHERE ct2.country_id = c.id LIMIT 1)) AS name, c.created_at AS "createdAt", c.updated_at AS "updatedAt"
+     FROM countries c
+     LEFT JOIN country_translations ct ON ct.country_id = c.id AND ct.language_id = $2
+     WHERE c.id = $1`,
+    [id, langId],
   );
 
   res.status(201).json(row.rows[0]);
@@ -848,20 +1163,52 @@ app.get('/api/v1/countries', async (req: Request, res: Response) => {
   const query = validate(CountryListSchema, req.query, res);
   if (!query) return;
 
+  const langId = await resolveLanguageId(req);
   const page = Math.max(1, Number(query.page));
   const limit = Math.min(100, Math.max(1, Number(query.limit)));
   const offset = (page - 1) * limit;
 
-  const where = query.name ? `WHERE name ILIKE '%' || $3 || '%'` : '';
-  const params = query.name ? [limit, offset, query.name] : [limit, offset];
-  const countParams = query.name ? [query.name] : [];
-  const countWhere = query.name ? `WHERE name ILIKE '%' || $1 || '%'` : '';
+  const conditions: string[] = [];
+  const params: unknown[] = [limit, offset, langId];
+  const countParams: unknown[] = [langId];
+  let paramIdx = 4;
+  let countIdx = 2;
+
+  if (query.name) {
+    conditions.push(
+      `COALESCE(ct.name, (SELECT ct2.name FROM country_translations ct2 WHERE ct2.country_id = c.id LIMIT 1)) ILIKE '%' || $${paramIdx} || '%'`,
+    );
+    params.push(query.name);
+    countParams.push(query.name);
+    paramIdx++;
+    countIdx++;
+  }
+
+  const where =
+    conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const countConditions: string[] = [];
+  let ci = 2;
+  if (query.name) {
+    countConditions.push(
+      `COALESCE(ct.name, (SELECT ct2.name FROM country_translations ct2 WHERE ct2.country_id = c.id LIMIT 1)) ILIKE '%' || $${ci} || '%'`,
+    );
+    ci++;
+  }
+  const countWhere =
+    countConditions.length > 0 ? `WHERE ${countConditions.join(' AND ')}` : '';
 
   const [countResult, rows] = await Promise.all([
-    pool.query(`SELECT COUNT(*) FROM countries ${countWhere}`, countParams),
     pool.query(
-      `SELECT id, name, created_at AS "createdAt", updated_at AS "updatedAt"
-       FROM countries ${where} ORDER BY name ASC LIMIT $1 OFFSET $2`,
+      `SELECT COUNT(*) FROM countries c
+       LEFT JOIN country_translations ct ON ct.country_id = c.id AND ct.language_id = $1
+       ${countWhere}`,
+      countParams,
+    ),
+    pool.query(
+      `SELECT c.id, COALESCE(ct.name, (SELECT ct2.name FROM country_translations ct2 WHERE ct2.country_id = c.id LIMIT 1)) AS name, c.created_at AS "createdAt", c.updated_at AS "updatedAt"
+       FROM countries c
+       LEFT JOIN country_translations ct ON ct.country_id = c.id AND ct.language_id = $3
+       ${where} ORDER BY name ASC LIMIT $1 OFFSET $2`,
       params,
     ),
   ]);
@@ -880,10 +1227,13 @@ app.get('/api/v1/countries/:id', async (req: Request, res: Response) => {
   const params = validate(IdParamSchema, req.params, res);
   if (!params) return;
 
+  const langId = await resolveLanguageId(req);
   const row = await pool.query(
-    `SELECT id, name, created_at AS "createdAt", updated_at AS "updatedAt"
-     FROM countries WHERE id = $1`,
-    [params.id],
+    `SELECT c.id, COALESCE(ct.name, (SELECT ct2.name FROM country_translations ct2 WHERE ct2.country_id = c.id LIMIT 1)) AS name, c.created_at AS "createdAt", c.updated_at AS "updatedAt"
+     FROM countries c
+     LEFT JOIN country_translations ct ON ct.country_id = c.id AND ct.language_id = $2
+     WHERE c.id = $1`,
+    [params.id, langId],
   );
 
   if (row.rows.length === 0) {
@@ -891,7 +1241,16 @@ app.get('/api/v1/countries/:id', async (req: Request, res: Response) => {
     return;
   }
 
-  res.status(200).json(row.rows[0]);
+  const result = row.rows[0]!;
+  if (req.query.allTranslations === 'true') {
+    const translations = await pool.query(
+      `SELECT l.code AS "languageCode", ct.name FROM country_translations ct JOIN languages l ON l.id = ct.language_id WHERE ct.country_id = $1`,
+      [params.id],
+    );
+    (result as Record<string, unknown>).translations = translations.rows;
+  }
+
+  res.status(200).json(result);
 });
 
 app.put('/api/v1/countries/:id', async (req: Request, res: Response) => {
@@ -912,25 +1271,55 @@ app.put('/api/v1/countries/:id', async (req: Request, res: Response) => {
     return;
   }
 
-  const nameCheck = await pool.query(
-    'SELECT id FROM countries WHERE name = $1 AND id != $2',
-    [data.name, data.id],
-  );
-  if (nameCheck.rows.length > 0) {
-    res.status(409).json({ code: 'COUNTRY_NAME_ALREADY_TAKEN_EXCEPTION' });
-    return;
-  }
-
-  const row = await pool.query(
-    `UPDATE countries SET name = $1, updated_at = NOW() WHERE id = $2
-     RETURNING id, name, created_at AS "createdAt", updated_at AS "updatedAt"`,
-    [data.name, data.id],
-  );
-
-  if (row.rows.length === 0) {
+  const existing = await pool.query('SELECT id FROM countries WHERE id = $1', [
+    data.id,
+  ]);
+  if (existing.rows.length === 0) {
     res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
     return;
   }
+
+  const langCodes = data.translations.map((t) => t.languageCode);
+  const langResult = await pool.query(
+    'SELECT id, code FROM languages WHERE code = ANY($1)',
+    [langCodes],
+  );
+  if (langResult.rows.length !== langCodes.length) {
+    res
+      .status(400)
+      .json({
+        code: 'VALIDATION_EXCEPTION',
+        violations: [
+          { property: 'translations', message: 'Invalid language code' },
+        ],
+      });
+    return;
+  }
+  const langMap = new Map(
+    langResult.rows.map((r) => [r.code as string, r.id as string]),
+  );
+
+  await pool.query('UPDATE countries SET updated_at = NOW() WHERE id = $1', [
+    data.id,
+  ]);
+  await pool.query('DELETE FROM country_translations WHERE country_id = $1', [
+    data.id,
+  ]);
+  for (const t of data.translations) {
+    await pool.query(
+      'INSERT INTO country_translations (id, country_id, language_id, name) VALUES ($1, $2, $3, $4)',
+      [crypto.randomUUID(), data.id, langMap.get(t.languageCode), t.name],
+    );
+  }
+
+  const langId = await resolveLanguageId(req);
+  const row = await pool.query(
+    `SELECT c.id, COALESCE(ct.name, (SELECT ct2.name FROM country_translations ct2 WHERE ct2.country_id = c.id LIMIT 1)) AS name, c.created_at AS "createdAt", c.updated_at AS "updatedAt"
+     FROM countries c
+     LEFT JOIN country_translations ct ON ct.country_id = c.id AND ct.language_id = $2
+     WHERE c.id = $1`,
+    [data.id, langId],
+  );
 
   res.status(200).json(row.rows[0]);
 });
@@ -976,13 +1365,13 @@ app.delete('/api/v1/countries/:id', async (req: Request, res: Response) => {
 // --- cities ---
 
 const CreateCitySchema = v.object({
-  name: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
+  translations: v.pipe(v.array(TranslationNameSchema), v.minLength(1)),
   countryId: UuidSchema,
 });
 
 const UpdateCitySchema = v.object({
   id: UuidSchema,
-  name: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
+  translations: v.pipe(v.array(TranslationNameSchema), v.minLength(1)),
   countryId: UuidSchema,
 });
 
@@ -1009,12 +1398,46 @@ app.post('/api/v1/cities', async (req: Request, res: Response) => {
     return;
   }
 
+  const langCodes = data.translations.map((t) => t.languageCode);
+  const langResult = await pool.query(
+    'SELECT id, code FROM languages WHERE code = ANY($1)',
+    [langCodes],
+  );
+  if (langResult.rows.length !== langCodes.length) {
+    res
+      .status(400)
+      .json({
+        code: 'VALIDATION_EXCEPTION',
+        violations: [
+          { property: 'translations', message: 'Invalid language code' },
+        ],
+      });
+    return;
+  }
+  const langMap = new Map(
+    langResult.rows.map((r) => [r.code as string, r.id as string]),
+  );
+
+  const langId = await resolveLanguageId(req);
   const id = crypto.randomUUID();
+  await pool.query('INSERT INTO cities (id, country_id) VALUES ($1, $2)', [
+    id,
+    data.countryId,
+  ]);
+
+  for (const t of data.translations) {
+    await pool.query(
+      'INSERT INTO city_translations (id, city_id, language_id, name) VALUES ($1, $2, $3, $4)',
+      [crypto.randomUUID(), id, langMap.get(t.languageCode), t.name],
+    );
+  }
+
   const row = await pool.query(
-    `INSERT INTO cities (id, country_id, name)
-     VALUES ($1, $2, $3)
-     RETURNING id, country_id AS "countryId", name, created_at AS "createdAt", updated_at AS "updatedAt"`,
-    [id, data.countryId, data.name],
+    `SELECT c.id, c.country_id AS "countryId", COALESCE(ct.name, (SELECT ct2.name FROM city_translations ct2 WHERE ct2.city_id = c.id LIMIT 1)) AS name, c.created_at AS "createdAt", c.updated_at AS "updatedAt"
+     FROM cities c
+     LEFT JOIN city_translations ct ON ct.city_id = c.id AND ct.language_id = $2
+     WHERE c.id = $1`,
+    [id, langId],
   );
 
   res.status(201).json(row.rows[0]);
@@ -1037,18 +1460,21 @@ app.get('/api/v1/cities', async (req: Request, res: Response) => {
   const query = validate(CityListSchema, req.query, res);
   if (!query) return;
 
+  const langId = await resolveLanguageId(req);
   const page = Math.max(1, Number(query.page));
   const limit = Math.min(100, Math.max(1, Number(query.limit)));
   const offset = (page - 1) * limit;
 
   const conditions: string[] = [];
-  const params: unknown[] = [limit, offset];
-  const countParams: unknown[] = [];
-  let paramIdx = 3;
-  let countIdx = 1;
+  const params: unknown[] = [limit, offset, langId];
+  const countParams: unknown[] = [langId];
+  let paramIdx = 4;
+  let countIdx = 2;
 
   if (query.name) {
-    conditions.push(`c.name ILIKE '%' || $${paramIdx} || '%'`);
+    conditions.push(
+      `COALESCE(ct.name, (SELECT ct2.name FROM city_translations ct2 WHERE ct2.city_id = c.id LIMIT 1)) ILIKE '%' || $${paramIdx} || '%'`,
+    );
     params.push(query.name);
     countParams.push(query.name);
     paramIdx++;
@@ -1065,9 +1491,11 @@ app.get('/api/v1/cities', async (req: Request, res: Response) => {
   const where =
     conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const countConditions: string[] = [];
-  let ci = 1;
+  let ci = 2;
   if (query.name) {
-    countConditions.push(`c.name ILIKE '%' || $${ci} || '%'`);
+    countConditions.push(
+      `COALESCE(ct.name, (SELECT ct2.name FROM city_translations ct2 WHERE ct2.city_id = c.id LIMIT 1)) ILIKE '%' || $${ci} || '%'`,
+    );
     ci++;
   }
   if (query.countryId) {
@@ -1078,12 +1506,22 @@ app.get('/api/v1/cities', async (req: Request, res: Response) => {
     countConditions.length > 0 ? `WHERE ${countConditions.join(' AND ')}` : '';
 
   const [countResult, rows] = await Promise.all([
-    pool.query(`SELECT COUNT(*) FROM cities c ${countWhere}`, countParams),
     pool.query(
-      `SELECT c.id, c.country_id AS "countryId", c.name, co.name AS "countryName",
+      `SELECT COUNT(*) FROM cities c
+       LEFT JOIN city_translations ct ON ct.city_id = c.id AND ct.language_id = $1
+       ${countWhere}`,
+      countParams,
+    ),
+    pool.query(
+      `SELECT c.id, c.country_id AS "countryId",
+              COALESCE(ct.name, (SELECT ct2.name FROM city_translations ct2 WHERE ct2.city_id = c.id LIMIT 1)) AS name,
+              COALESCE(cot.name, (SELECT cot2.name FROM country_translations cot2 WHERE cot2.country_id = co.id LIMIT 1)) AS "countryName",
               c.created_at AS "createdAt", c.updated_at AS "updatedAt"
-       FROM cities c JOIN countries co ON co.id = c.country_id
-       ${where} ORDER BY c.name ASC LIMIT $1 OFFSET $2`,
+       FROM cities c
+       JOIN countries co ON co.id = c.country_id
+       LEFT JOIN city_translations ct ON ct.city_id = c.id AND ct.language_id = $3
+       LEFT JOIN country_translations cot ON cot.country_id = co.id AND cot.language_id = $3
+       ${where} ORDER BY name ASC LIMIT $1 OFFSET $2`,
       params,
     ),
   ]);
@@ -1102,12 +1540,18 @@ app.get('/api/v1/cities/:id', async (req: Request, res: Response) => {
   const params = validate(IdParamSchema, req.params, res);
   if (!params) return;
 
+  const langId = await resolveLanguageId(req);
   const row = await pool.query(
-    `SELECT c.id, c.country_id AS "countryId", c.name, co.name AS "countryName",
+    `SELECT c.id, c.country_id AS "countryId",
+            COALESCE(ct.name, (SELECT ct2.name FROM city_translations ct2 WHERE ct2.city_id = c.id LIMIT 1)) AS name,
+            COALESCE(cot.name, (SELECT cot2.name FROM country_translations cot2 WHERE cot2.country_id = co.id LIMIT 1)) AS "countryName",
             c.created_at AS "createdAt", c.updated_at AS "updatedAt"
-     FROM cities c JOIN countries co ON co.id = c.country_id
+     FROM cities c
+     JOIN countries co ON co.id = c.country_id
+     LEFT JOIN city_translations ct ON ct.city_id = c.id AND ct.language_id = $2
+     LEFT JOIN country_translations cot ON cot.country_id = co.id AND cot.language_id = $2
      WHERE c.id = $1`,
-    [params.id],
+    [params.id, langId],
   );
 
   if (row.rows.length === 0) {
@@ -1115,7 +1559,16 @@ app.get('/api/v1/cities/:id', async (req: Request, res: Response) => {
     return;
   }
 
-  res.status(200).json(row.rows[0]);
+  const result = row.rows[0]!;
+  if (req.query.allTranslations === 'true') {
+    const translations = await pool.query(
+      `SELECT l.code AS "languageCode", ct.name FROM city_translations ct JOIN languages l ON l.id = ct.language_id WHERE ct.city_id = $1`,
+      [params.id],
+    );
+    (result as Record<string, unknown>).translations = translations.rows;
+  }
+
+  res.status(200).json(result);
 });
 
 app.put('/api/v1/cities/:id', async (req: Request, res: Response) => {
@@ -1132,6 +1585,14 @@ app.put('/api/v1/cities/:id', async (req: Request, res: Response) => {
     return;
   }
 
+  const existing = await pool.query('SELECT id FROM cities WHERE id = $1', [
+    data.id,
+  ]);
+  if (existing.rows.length === 0) {
+    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+    return;
+  }
+
   const countryCheck = await pool.query(
     'SELECT id FROM countries WHERE id = $1',
     [data.countryId],
@@ -1141,16 +1602,48 @@ app.put('/api/v1/cities/:id', async (req: Request, res: Response) => {
     return;
   }
 
-  const row = await pool.query(
-    `UPDATE cities SET name = $1, country_id = $2, updated_at = NOW() WHERE id = $3
-     RETURNING id, country_id AS "countryId", name, created_at AS "createdAt", updated_at AS "updatedAt"`,
-    [data.name, data.countryId, data.id],
+  const langCodes = data.translations.map((t) => t.languageCode);
+  const langResult = await pool.query(
+    'SELECT id, code FROM languages WHERE code = ANY($1)',
+    [langCodes],
   );
-
-  if (row.rows.length === 0) {
-    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+  if (langResult.rows.length !== langCodes.length) {
+    res
+      .status(400)
+      .json({
+        code: 'VALIDATION_EXCEPTION',
+        violations: [
+          { property: 'translations', message: 'Invalid language code' },
+        ],
+      });
     return;
   }
+  const langMap = new Map(
+    langResult.rows.map((r) => [r.code as string, r.id as string]),
+  );
+
+  await pool.query(
+    'UPDATE cities SET country_id = $1, updated_at = NOW() WHERE id = $2',
+    [data.countryId, data.id],
+  );
+  await pool.query('DELETE FROM city_translations WHERE city_id = $1', [
+    data.id,
+  ]);
+  for (const t of data.translations) {
+    await pool.query(
+      'INSERT INTO city_translations (id, city_id, language_id, name) VALUES ($1, $2, $3, $4)',
+      [crypto.randomUUID(), data.id, langMap.get(t.languageCode), t.name],
+    );
+  }
+
+  const langId = await resolveLanguageId(req);
+  const row = await pool.query(
+    `SELECT c.id, c.country_id AS "countryId", COALESCE(ct.name, (SELECT ct2.name FROM city_translations ct2 WHERE ct2.city_id = c.id LIMIT 1)) AS name, c.created_at AS "createdAt", c.updated_at AS "updatedAt"
+     FROM cities c
+     LEFT JOIN city_translations ct ON ct.city_id = c.id AND ct.language_id = $2
+     WHERE c.id = $1`,
+    [data.id, langId],
+  );
 
   res.status(200).json(row.rows[0]);
 });
@@ -1263,14 +1756,15 @@ app.get('/api/v1/places', async (req: Request, res: Response) => {
   const query = validate(PlaceListSchema, req.query, res);
   if (!query) return;
 
+  const langId = await resolveLanguageId(req);
   const page = Math.max(1, Number(query.page));
   const limit = Math.min(100, Math.max(1, Number(query.limit)));
   const offset = (page - 1) * limit;
 
   const conditions: string[] = [];
-  const params: unknown[] = [limit, offset, payload.sub];
+  const params: unknown[] = [limit, offset, payload.sub, langId];
   const countParams: unknown[] = [payload.sub];
-  let paramIdx = 4;
+  let paramIdx = 5;
   let countIdx = 2;
 
   if (query.search) {
@@ -1322,12 +1816,15 @@ app.get('/api/v1/places', async (req: Request, res: Response) => {
     ),
     pool.query(
       `SELECT p.id, p.city_id AS "cityId", p.name, p.address, p.latitude, p.longitude,
-              ci.name AS "cityName", co.name AS "countryName",
+              COALESCE(cit.name, (SELECT cit2.name FROM city_translations cit2 WHERE cit2.city_id = ci.id LIMIT 1)) AS "cityName",
+              COALESCE(cot.name, (SELECT cot2.name FROM country_translations cot2 WHERE cot2.country_id = co.id LIMIT 1)) AS "countryName",
               p.created_at AS "createdAt", p.updated_at AS "updatedAt",
               CASE WHEN fp.human_id IS NOT NULL THEN true ELSE false END AS "isFavourite"
        FROM places p
        JOIN cities ci ON ci.id = p.city_id
        JOIN countries co ON co.id = ci.country_id
+       LEFT JOIN city_translations cit ON cit.city_id = ci.id AND cit.language_id = $4
+       LEFT JOIN country_translations cot ON cot.country_id = co.id AND cot.language_id = $4
        LEFT JOIN favourite_places fp ON fp.place_id = p.id AND fp.human_id = $3
        ${where} ORDER BY p.name ASC LIMIT $1 OFFSET $2`,
       params,
@@ -1348,15 +1845,19 @@ app.get('/api/v1/places/:id', async (req: Request, res: Response) => {
   const params = validate(IdParamSchema, req.params, res);
   if (!params) return;
 
+  const langId = await resolveLanguageId(req);
   const row = await pool.query(
     `SELECT p.id, p.city_id AS "cityId", p.name, p.address, p.latitude, p.longitude,
-            ci.name AS "cityName", co.name AS "countryName",
+            COALESCE(cit.name, (SELECT cit2.name FROM city_translations cit2 WHERE cit2.city_id = ci.id LIMIT 1)) AS "cityName",
+            COALESCE(cot.name, (SELECT cot2.name FROM country_translations cot2 WHERE cot2.country_id = co.id LIMIT 1)) AS "countryName",
             p.created_at AS "createdAt", p.updated_at AS "updatedAt"
      FROM places p
      JOIN cities ci ON ci.id = p.city_id
      JOIN countries co ON co.id = ci.country_id
+     LEFT JOIN city_translations cit ON cit.city_id = ci.id AND cit.language_id = $2
+     LEFT JOIN country_translations cot ON cot.country_id = co.id AND cot.language_id = $2
      WHERE p.id = $1`,
-    [params.id],
+    [params.id, langId],
   );
 
   if (row.rows.length === 0) {
@@ -1455,45 +1956,51 @@ const FavouriteOrganisationSchema = v.object({
   organisationId: UuidSchema,
 });
 
-app.post('/api/v1/favourite-organisations', async (req: Request, res: Response) => {
-  const payload = authenticate(req);
-  if (!payload) {
-    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
-    return;
-  }
+app.post(
+  '/api/v1/favourite-organisations',
+  async (req: Request, res: Response) => {
+    const payload = authenticate(req);
+    if (!payload) {
+      res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+      return;
+    }
 
-  const data = validate(FavouriteOrganisationSchema, req.body, res);
-  if (!data) return;
+    const data = validate(FavouriteOrganisationSchema, req.body, res);
+    if (!data) return;
 
-  await pool.query(
-    'INSERT INTO favourite_organisations (human_id, organisation_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-    [payload.sub, data.organisationId],
-  );
+    await pool.query(
+      'INSERT INTO favourite_organisations (human_id, organisation_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+      [payload.sub, data.organisationId],
+    );
 
-  res.status(200).end();
-});
+    res.status(200).end();
+  },
+);
 
 const FavouriteOrganisationParamSchema = v.object({
   organisationId: UuidSchema,
 });
 
-app.delete('/api/v1/favourite-organisations/:organisationId', async (req: Request, res: Response) => {
-  const payload = authenticate(req);
-  if (!payload) {
-    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
-    return;
-  }
+app.delete(
+  '/api/v1/favourite-organisations/:organisationId',
+  async (req: Request, res: Response) => {
+    const payload = authenticate(req);
+    if (!payload) {
+      res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+      return;
+    }
 
-  const params = validate(FavouriteOrganisationParamSchema, req.params, res);
-  if (!params) return;
+    const params = validate(FavouriteOrganisationParamSchema, req.params, res);
+    if (!params) return;
 
-  await pool.query(
-    'DELETE FROM favourite_organisations WHERE human_id = $1 AND organisation_id = $2',
-    [payload.sub, params.organisationId],
-  );
+    await pool.query(
+      'DELETE FROM favourite_organisations WHERE human_id = $1 AND organisation_id = $2',
+      [payload.sub, params.organisationId],
+    );
 
-  res.status(200).end();
-});
+    res.status(200).end();
+  },
+);
 
 const FavouritePlaceSchema = v.object({
   placeId: UuidSchema,
@@ -1521,29 +2028,37 @@ const FavouritePlaceParamSchema = v.object({
   placeId: UuidSchema,
 });
 
-app.delete('/api/v1/favourite-places/:placeId', async (req: Request, res: Response) => {
-  const payload = authenticate(req);
-  if (!payload) {
-    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
-    return;
-  }
+app.delete(
+  '/api/v1/favourite-places/:placeId',
+  async (req: Request, res: Response) => {
+    const payload = authenticate(req);
+    if (!payload) {
+      res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+      return;
+    }
 
-  const params = validate(FavouritePlaceParamSchema, req.params, res);
-  if (!params) return;
+    const params = validate(FavouritePlaceParamSchema, req.params, res);
+    if (!params) return;
 
-  await pool.query(
-    'DELETE FROM favourite_places WHERE human_id = $1 AND place_id = $2',
-    [payload.sub, params.placeId],
-  );
+    await pool.query(
+      'DELETE FROM favourite_places WHERE human_id = $1 AND place_id = $2',
+      [payload.sub, params.placeId],
+    );
 
-  res.status(200).end();
-});
+    res.status(200).end();
+  },
+);
 
 // --- events ---
 
-const CreateEventSchema = v.object({
+const EventTranslationSchema = v.object({
+  languageCode: v.pipe(v.string(), v.minLength(1)),
   title: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
   description: v.string(),
+});
+
+const CreateEventSchema = v.object({
+  translations: v.pipe(v.array(EventTranslationSchema), v.minLength(1)),
   placeId: UuidSchema,
   startDate: v.pipe(v.string(), v.isoTimestamp()),
   endDate: v.pipe(v.string(), v.isoTimestamp()),
@@ -1565,6 +2080,26 @@ app.post('/api/v1/events', async (req: Request, res: Response) => {
   const data = validate(CreateEventSchema, req.body, res);
   if (!data) return;
 
+  const langCodes = data.translations.map((t) => t.languageCode);
+  const langResult = await pool.query(
+    'SELECT id, code FROM languages WHERE code = ANY($1)',
+    [langCodes],
+  );
+  if (langResult.rows.length !== langCodes.length) {
+    res
+      .status(400)
+      .json({
+        code: 'VALIDATION_EXCEPTION',
+        violations: [
+          { property: 'translations', message: 'Invalid language code' },
+        ],
+      });
+    return;
+  }
+  const langMap = new Map(
+    langResult.rows.map((r) => [r.code as string, r.id as string]),
+  );
+
   const placeCheck = await pool.query('SELECT id FROM places WHERE id = $1', [
     data.placeId,
   ]);
@@ -1585,30 +2120,37 @@ app.post('/api/v1/events', async (req: Request, res: Response) => {
   }
 
   const eventId = crypto.randomUUID();
-  const row = await pool.query(
-    `INSERT INTO events (id, human_id, organisation_id, place_id, title, description, start_date, end_date)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-     RETURNING id, human_id AS "humanId", organisation_id AS "organisationId",
-               place_id AS "placeId", title, description,
-               start_date AS "startDate", end_date AS "endDate", created_at AS "createdAt"`,
+  await pool.query(
+    `INSERT INTO events (id, human_id, organisation_id, place_id, start_date, end_date)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
     [
       eventId,
       payload.sub,
       data.organisationId ?? null,
       data.placeId,
-      data.title,
-      data.description,
       data.startDate,
       data.endDate,
     ],
   );
 
-  const event = row.rows[0]!;
+  for (const t of data.translations) {
+    await pool.query(
+      'INSERT INTO event_translations (id, event_id, language_id, title, description) VALUES ($1, $2, $3, $4, $5)',
+      [
+        crypto.randomUUID(),
+        eventId,
+        langMap.get(t.languageCode),
+        t.title,
+        t.description,
+      ],
+    );
+  }
+
   let tags: { id: string; name: string }[] = [];
 
   if (data.tagIds && data.tagIds.length > 0) {
     const tagCheck = await pool.query(
-      'SELECT id, name FROM tags WHERE id = ANY($1)',
+      'SELECT id FROM tags WHERE id = ANY($1)',
       [data.tagIds],
     );
     if (tagCheck.rows.length !== data.tagIds.length) {
@@ -1620,10 +2162,23 @@ app.post('/api/v1/events', async (req: Request, res: Response) => {
       `INSERT INTO event_tags (event_id, tag_id) VALUES ${values}`,
       [eventId, ...data.tagIds],
     );
-    tags = tagCheck.rows as { id: string; name: string }[];
   }
 
-  res.status(201).json({ ...event, tags });
+  const langId = await resolveLanguageId(req);
+  const row = await pool.query(
+    `SELECT e.id, e.human_id AS "humanId", e.organisation_id AS "organisationId",
+            e.place_id AS "placeId",
+            COALESCE(et_tr.title, (SELECT et2.title FROM event_translations et2 WHERE et2.event_id = e.id LIMIT 1)) AS title,
+            COALESCE(et_tr.description, (SELECT et2.description FROM event_translations et2 WHERE et2.event_id = e.id LIMIT 1)) AS description,
+            e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
+            COALESCE((SELECT json_agg(json_build_object('id', tg.id, 'name', COALESCE(tgt.name, (SELECT tgt2.name FROM tag_translations tgt2 WHERE tgt2.tag_id = tg.id LIMIT 1)))) FROM event_tags etg JOIN tags tg ON tg.id = etg.tag_id LEFT JOIN tag_translations tgt ON tgt.tag_id = tg.id AND tgt.language_id = $2 WHERE etg.event_id = e.id), '[]'::json) AS "tags"
+     FROM events e
+     LEFT JOIN event_translations et_tr ON et_tr.event_id = e.id AND et_tr.language_id = $2
+     WHERE e.id = $1`,
+    [eventId, langId],
+  );
+
+  res.status(201).json(row.rows[0]);
 });
 
 const EventListSchema = v.object({
@@ -1643,19 +2198,20 @@ app.get('/api/v1/events', async (req: Request, res: Response) => {
   const query = validate(EventListSchema, req.query, res);
   if (!query) return;
 
+  const langId = await resolveLanguageId(req);
   const page = Math.max(1, Number(query.page));
   const limit = Math.min(100, Math.max(1, Number(query.limit)));
   const offset = (page - 1) * limit;
 
   const conditions: string[] = ['e.start_date >= CURRENT_DATE'];
-  const params: unknown[] = [limit, offset];
-  const countParams: unknown[] = [];
-  let paramIdx = 3;
-  let countIdx = 1;
+  const params: unknown[] = [limit, offset, langId];
+  const countParams: unknown[] = [langId];
+  let paramIdx = 4;
+  let countIdx = 2;
 
   if (query.search) {
     conditions.push(
-      `(e.title ILIKE '%' || $${paramIdx} || '%' OR p.name ILIKE '%' || $${paramIdx} || '%' OR o.name ILIKE '%' || $${paramIdx} || '%')`,
+      `(COALESCE(et_tr.title, (SELECT et2.title FROM event_translations et2 WHERE et2.event_id = e.id LIMIT 1)) ILIKE '%' || $${paramIdx} || '%' OR p.name ILIKE '%' || $${paramIdx} || '%' OR o.name ILIKE '%' || $${paramIdx} || '%')`,
     );
     params.push(query.search);
     countParams.push(query.search);
@@ -1672,10 +2228,10 @@ app.get('/api/v1/events', async (req: Request, res: Response) => {
 
   const where = conditions.join(' AND ');
   const countConditions: string[] = ['e.start_date >= CURRENT_DATE'];
-  let ci = 1;
+  let ci = 2;
   if (query.search) {
     countConditions.push(
-      `(e.title ILIKE '%' || $${ci} || '%' OR p.name ILIKE '%' || $${ci} || '%' OR o.name ILIKE '%' || $${ci} || '%')`,
+      `(COALESCE(et_tr.title, (SELECT et2.title FROM event_translations et2 WHERE et2.event_id = e.id LIMIT 1)) ILIKE '%' || $${ci} || '%' OR p.name ILIKE '%' || $${ci} || '%' OR o.name ILIKE '%' || $${ci} || '%')`,
     );
     ci++;
   }
@@ -1690,19 +2246,23 @@ app.get('/api/v1/events', async (req: Request, res: Response) => {
       `SELECT COUNT(*) FROM events e
        JOIN places p ON p.id = e.place_id
        LEFT JOIN organisations o ON o.id = e.organisation_id
+       LEFT JOIN event_translations et_tr ON et_tr.event_id = e.id AND et_tr.language_id = $1
        WHERE ${countWhere}`,
       countParams,
     ),
     pool.query(
       `SELECT e.id, e.human_id AS "humanId", e.organisation_id AS "organisationId",
-              e.place_id AS "placeId", e.title, e.description,
+              e.place_id AS "placeId",
+              COALESCE(et_tr.title, (SELECT et2.title FROM event_translations et2 WHERE et2.event_id = e.id LIMIT 1)) AS title,
+              COALESCE(et_tr.description, (SELECT et2.description FROM event_translations et2 WHERE et2.event_id = e.id LIMIT 1)) AS description,
               p.latitude, p.longitude, p.name AS "placeName", p.address AS "placeAddress",
               e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
               o.name AS "organisationName",
-              COALESCE((SELECT json_agg(json_build_object('id', tg.id, 'name', tg.name)) FROM event_tags et JOIN tags tg ON tg.id = et.tag_id WHERE et.event_id = e.id), '[]'::json) AS "tags"
+              COALESCE((SELECT json_agg(json_build_object('id', tg.id, 'name', COALESCE(tgt.name, (SELECT tgt2.name FROM tag_translations tgt2 WHERE tgt2.tag_id = tg.id LIMIT 1)))) FROM event_tags etg JOIN tags tg ON tg.id = etg.tag_id LEFT JOIN tag_translations tgt ON tgt.tag_id = tg.id AND tgt.language_id = $3 WHERE etg.event_id = e.id), '[]'::json) AS "tags"
        FROM events e
        JOIN places p ON p.id = e.place_id
        LEFT JOIN organisations o ON o.id = e.organisation_id
+       LEFT JOIN event_translations et_tr ON et_tr.event_id = e.id AND et_tr.language_id = $3
        WHERE ${where}
        ORDER BY e.start_date ASC LIMIT $1 OFFSET $2`,
       params,
@@ -1749,21 +2309,25 @@ app.get('/api/v1/events/area', async (req: Request, res: Response) => {
     return;
   }
 
+  const langId = await resolveLanguageId(req);
   const rows = await pool.query(
     `SELECT e.id, e.human_id AS "humanId", e.organisation_id AS "organisationId",
-            e.place_id AS "placeId", e.title, e.description,
+            e.place_id AS "placeId",
+            COALESCE(et_tr.title, (SELECT et2.title FROM event_translations et2 WHERE et2.event_id = e.id LIMIT 1)) AS title,
+            COALESCE(et_tr.description, (SELECT et2.description FROM event_translations et2 WHERE et2.event_id = e.id LIMIT 1)) AS description,
             p.latitude, p.longitude, p.name AS "placeName", p.address AS "placeAddress",
             e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
             o.name AS "organisationName",
-            COALESCE((SELECT json_agg(json_build_object('id', tg.id, 'name', tg.name)) FROM event_tags et JOIN tags tg ON tg.id = et.tag_id WHERE et.event_id = e.id), '[]'::json) AS "tags"
+            COALESCE((SELECT json_agg(json_build_object('id', tg.id, 'name', COALESCE(tgt.name, (SELECT tgt2.name FROM tag_translations tgt2 WHERE tgt2.tag_id = tg.id LIMIT 1)))) FROM event_tags etg JOIN tags tg ON tg.id = etg.tag_id LEFT JOIN tag_translations tgt ON tgt.tag_id = tg.id AND tgt.language_id = $5 WHERE etg.event_id = e.id), '[]'::json) AS "tags"
      FROM events e
      JOIN places p ON p.id = e.place_id
      LEFT JOIN organisations o ON o.id = e.organisation_id
+     LEFT JOIN event_translations et_tr ON et_tr.event_id = e.id AND et_tr.language_id = $5
      WHERE e.start_date >= CURRENT_DATE
        AND p.latitude >= $1 AND p.latitude <= $2
        AND p.longitude >= $3 AND p.longitude <= $4
      ORDER BY e.start_date ASC`,
-    [query.minLat, query.maxLat, query.minLng, query.maxLng],
+    [query.minLat, query.maxLat, query.minLng, query.maxLng, langId],
   );
 
   res.status(200).json({ data: rows.rows });
@@ -1779,18 +2343,22 @@ app.get('/api/v1/events/:id', async (req: Request, res: Response) => {
   const params = validate(IdParamSchema, req.params, res);
   if (!params) return;
 
+  const langId = await resolveLanguageId(req);
   const row = await pool.query(
     `SELECT e.id, e.human_id AS "humanId", e.organisation_id AS "organisationId",
-            e.place_id AS "placeId", e.title, e.description,
+            e.place_id AS "placeId",
+            COALESCE(et_tr.title, (SELECT et2.title FROM event_translations et2 WHERE et2.event_id = e.id LIMIT 1)) AS title,
+            COALESCE(et_tr.description, (SELECT et2.description FROM event_translations et2 WHERE et2.event_id = e.id LIMIT 1)) AS description,
             p.latitude, p.longitude, p.name AS "placeName", p.address AS "placeAddress",
             e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
             o.name AS "organisationName",
-            COALESCE((SELECT json_agg(json_build_object('id', tg.id, 'name', tg.name)) FROM event_tags et JOIN tags tg ON tg.id = et.tag_id WHERE et.event_id = e.id), '[]'::json) AS "tags"
+            COALESCE((SELECT json_agg(json_build_object('id', tg.id, 'name', COALESCE(tgt.name, (SELECT tgt2.name FROM tag_translations tgt2 WHERE tgt2.tag_id = tg.id LIMIT 1)))) FROM event_tags etg JOIN tags tg ON tg.id = etg.tag_id LEFT JOIN tag_translations tgt ON tgt.tag_id = tg.id AND tgt.language_id = $2 WHERE etg.event_id = e.id), '[]'::json) AS "tags"
      FROM events e
      JOIN places p ON p.id = e.place_id
      LEFT JOIN organisations o ON o.id = e.organisation_id
+     LEFT JOIN event_translations et_tr ON et_tr.event_id = e.id AND et_tr.language_id = $2
      WHERE e.id = $1`,
-    [params.id],
+    [params.id, langId],
   );
 
   if (row.rows.length === 0) {
@@ -1798,13 +2366,21 @@ app.get('/api/v1/events/:id', async (req: Request, res: Response) => {
     return;
   }
 
-  res.status(200).json(row.rows[0]);
+  const result = row.rows[0]!;
+  if (req.query.allTranslations === 'true') {
+    const translations = await pool.query(
+      `SELECT l.code AS "languageCode", et.title, et.description FROM event_translations et JOIN languages l ON l.id = et.language_id WHERE et.event_id = $1`,
+      [params.id],
+    );
+    (result as Record<string, unknown>).translations = translations.rows;
+  }
+
+  res.status(200).json(result);
 });
 
 const UpdateEventSchema = v.object({
   id: UuidSchema,
-  title: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
-  description: v.string(),
+  translations: v.pipe(v.array(EventTranslationSchema), v.minLength(1)),
   placeId: UuidSchema,
   startDate: v.pipe(v.string(), v.isoTimestamp()),
   endDate: v.pipe(v.string(), v.isoTimestamp()),
@@ -1834,6 +2410,26 @@ app.put('/api/v1/events/:id', async (req: Request, res: Response) => {
     return;
   }
 
+  const langCodes = data.translations.map((t) => t.languageCode);
+  const langResult = await pool.query(
+    'SELECT id, code FROM languages WHERE code = ANY($1)',
+    [langCodes],
+  );
+  if (langResult.rows.length !== langCodes.length) {
+    res
+      .status(400)
+      .json({
+        code: 'VALIDATION_EXCEPTION',
+        violations: [
+          { property: 'translations', message: 'Invalid language code' },
+        ],
+      });
+    return;
+  }
+  const langMap = new Map(
+    langResult.rows.map((r) => [r.code as string, r.id as string]),
+  );
+
   const placeCheck = await pool.query('SELECT id FROM places WHERE id = $1', [
     data.placeId,
   ]);
@@ -1853,15 +2449,10 @@ app.put('/api/v1/events/:id', async (req: Request, res: Response) => {
     }
   }
 
-  const row = await pool.query(
-    `UPDATE events SET title = $1, description = $2, place_id = $3, start_date = $4, end_date = $5, organisation_id = $6
-     WHERE id = $7
-     RETURNING id, human_id AS "humanId", organisation_id AS "organisationId",
-               place_id AS "placeId", title, description,
-               start_date AS "startDate", end_date AS "endDate", created_at AS "createdAt"`,
+  await pool.query(
+    `UPDATE events SET place_id = $1, start_date = $2, end_date = $3, organisation_id = $4
+     WHERE id = $5`,
     [
-      data.title,
-      data.description,
       data.placeId,
       data.startDate,
       data.endDate,
@@ -1870,14 +2461,27 @@ app.put('/api/v1/events/:id', async (req: Request, res: Response) => {
     ],
   );
 
-  const updatedEvent = row.rows[0]!;
-  let updatedTags: { id: string; name: string }[] = [];
+  await pool.query('DELETE FROM event_translations WHERE event_id = $1', [
+    data.id,
+  ]);
+  for (const t of data.translations) {
+    await pool.query(
+      'INSERT INTO event_translations (id, event_id, language_id, title, description) VALUES ($1, $2, $3, $4, $5)',
+      [
+        crypto.randomUUID(),
+        data.id,
+        langMap.get(t.languageCode),
+        t.title,
+        t.description,
+      ],
+    );
+  }
 
   if (data.tagIds) {
     await pool.query('DELETE FROM event_tags WHERE event_id = $1', [data.id]);
     if (data.tagIds.length > 0) {
       const tagCheck = await pool.query(
-        'SELECT id, name FROM tags WHERE id = ANY($1)',
+        'SELECT id FROM tags WHERE id = ANY($1)',
         [data.tagIds],
       );
       if (tagCheck.rows.length !== data.tagIds.length) {
@@ -1889,17 +2493,24 @@ app.put('/api/v1/events/:id', async (req: Request, res: Response) => {
         `INSERT INTO event_tags (event_id, tag_id) VALUES ${values}`,
         [data.id, ...data.tagIds],
       );
-      updatedTags = tagCheck.rows as { id: string; name: string }[];
     }
-  } else {
-    const existingTags = await pool.query(
-      `SELECT tg.id, tg.name FROM event_tags et JOIN tags tg ON tg.id = et.tag_id WHERE et.event_id = $1`,
-      [data.id],
-    );
-    updatedTags = existingTags.rows as { id: string; name: string }[];
   }
 
-  res.status(200).json({ ...updatedEvent, tags: updatedTags });
+  const langId = await resolveLanguageId(req);
+  const row = await pool.query(
+    `SELECT e.id, e.human_id AS "humanId", e.organisation_id AS "organisationId",
+            e.place_id AS "placeId",
+            COALESCE(et_tr.title, (SELECT et2.title FROM event_translations et2 WHERE et2.event_id = e.id LIMIT 1)) AS title,
+            COALESCE(et_tr.description, (SELECT et2.description FROM event_translations et2 WHERE et2.event_id = e.id LIMIT 1)) AS description,
+            e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
+            COALESCE((SELECT json_agg(json_build_object('id', tg.id, 'name', COALESCE(tgt.name, (SELECT tgt2.name FROM tag_translations tgt2 WHERE tgt2.tag_id = tg.id LIMIT 1)))) FROM event_tags etg JOIN tags tg ON tg.id = etg.tag_id LEFT JOIN tag_translations tgt ON tgt.tag_id = tg.id AND tgt.language_id = $2 WHERE etg.event_id = e.id), '[]'::json) AS "tags"
+     FROM events e
+     LEFT JOIN event_translations et_tr ON et_tr.event_id = e.id AND et_tr.language_id = $2
+     WHERE e.id = $1`,
+    [data.id, langId],
+  );
+
+  res.status(200).json(row.rows[0]);
 });
 
 app.delete('/api/v1/events/:id', async (req: Request, res: Response) => {
@@ -1931,7 +2542,7 @@ app.delete('/api/v1/events/:id', async (req: Request, res: Response) => {
 
 // --- pages ---
 
-const PAGE_STYLE = `*{margin:0;padding:0;box-sizing:border-box}body{background:#fff;color:#000;font-family:monospace;font-size:16px}.c{max-width:1000px;margin:0 auto;padding:24px 16px}a{color:#000}nav{margin:8px 0 16px}nav .btn{margin:2px 0}#cityBtn{white-space:nowrap}hr{border:none;border-top:1px solid #000;margin:16px 0}input,select{border:1px solid #000;padding:6px;margin:4px 0 12px;width:100%;font-family:monospace;font-size:16px}button{border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer}#err{font-weight:bold;margin-top:12px}.dropdown{border:1px solid #000;max-height:150px;overflow-y:auto;display:none}.dropdown div{padding:4px 6px;cursor:pointer}.dropdown div:hover{background:#000;color:#fff}.bc{margin:8px 0;font-size:14px}.searchRow{display:flex;align-items:center;gap:12px;margin-bottom:12px}.searchRow input{flex:1;margin:0}.searchRow .btn{white-space:nowrap}#cityPicker{position:relative}#cityPicker input{width:180px;margin:0}#cityPicker .dropdown{position:absolute;right:0;width:180px;background:#fff;z-index:10}.btn{display:inline-block;border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer;text-decoration:none;margin-bottom:4px}.btn:hover{background:#000;color:#fff}.tag{display:inline-block;border:1px solid #000;padding:2px 8px;margin:2px;font-size:14px}.tag-chip{display:inline-block;border:1px solid #000;padding:2px 8px;margin:2px;font-size:14px;cursor:pointer}.tag-chip:hover{background:#000;color:#fff}#tagChips{margin:4px 0}`;
+const PAGE_STYLE = `*{margin:0;padding:0;box-sizing:border-box}body{background:#fff;color:#000;font-family:monospace;font-size:16px}.c{max-width:1000px;margin:0 auto;padding:24px 16px}a{color:#000}nav{margin:8px 0 16px}nav .btn{margin:2px 0}#cityBtn{white-space:nowrap}hr{border:none;border-top:1px solid #000;margin:16px 0}input,select{border:1px solid #000;padding:6px;margin:4px 0 12px;width:100%;font-family:monospace;font-size:16px}button{border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer}#err{font-weight:bold;margin-top:12px}.dropdown{border:1px solid #000;max-height:150px;overflow-y:auto;display:none}.dropdown div{padding:4px 6px;cursor:pointer}.dropdown div:hover{background:#000;color:#fff}.bc{margin:8px 0;font-size:14px}.searchRow{display:flex;align-items:center;gap:12px;margin-bottom:12px}.searchRow input{flex:1;margin:0}.searchRow .btn{white-space:nowrap}#cityPicker{position:relative}#cityPicker input{width:180px;margin:0}#cityPicker .dropdown{position:absolute;right:0;width:180px;background:#fff;z-index:10}#langSelect{border:1px solid #000;padding:6px;font-family:monospace;font-size:14px;margin:0;width:auto}.btn{display:inline-block;border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer;text-decoration:none;margin-bottom:4px}.btn:hover{background:#000;color:#fff}.tag{display:inline-block;border:1px solid #000;padding:2px 8px;margin:2px;font-size:14px}.tag-chip{display:inline-block;border:1px solid #000;padding:2px 8px;margin:2px;font-size:14px;cursor:pointer}.tag-chip:hover{background:#000;color:#fff}#tagChips{margin:4px 0}`;
 const PAGE_HEAD = `<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${PAGE_STYLE}</style>`;
 const NAV_SCRIPT = `<script>
 (function(){const t=localStorage.getItem('accessToken');if(!t)return;
@@ -1994,7 +2605,7 @@ function showDrop(cities){
 function fetchCities(name){
   var url='/api/v1/cities?limit=20';
   if(name)url+='&name='+encodeURIComponent(name);
-  fetch(url,{headers:{'Authorization':'Bearer '+t}}).then(function(r){return r.json()}).then(function(j){showDrop(j.data||[])});
+  fetch(url,{headers:{'Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}}).then(function(r){return r.json()}).then(function(j){showDrop(j.data||[])});
 }
 cityBtn.onclick=function(e){
   e.preventDefault();
@@ -2029,7 +2640,28 @@ cityInput.onblur=function(){
 };
 })();
 </script>`;
-const APP_NAV = `<nav style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:4px"><span><a href="/" class="btn">Events</a> <a href="/organisations-list" class="btn">Organisations</a> <a href="/places-list" class="btn">Places</a> <span id="adminNav" style="display:none"><a href="/countries-list" class="btn">Countries</a> <a href="/cities-list" class="btn">Cities</a> <a href="/tags-list" class="btn">Tags</a> </span><a href="/profile" class="btn">Profile</a></span><span id="cityPicker"><button id="cityBtn">All cities</button><span id="cityInputWrap" style="display:none"><input type="text" id="cityInput" placeholder="Search city..." autocomplete="off"><div class="dropdown" id="cityDrop"></div></span></span></nav>${NAV_SCRIPT}`;
+const LANG_PICKER_SCRIPT = `<script>
+(function(){
+  var sel=document.getElementById('langSelect');if(!sel)return;
+  fetch('/api/v1/languages').then(function(r){return r.json()}).then(function(langs){
+    if(!Array.isArray(langs)||langs.length===0)return;
+    sel.innerHTML='';
+    for(var i=0;i<langs.length;i++){
+      var o=document.createElement('option');
+      o.value=langs[i].code;o.textContent=langs[i].code.toUpperCase();
+      sel.appendChild(o);
+    }
+    var saved=localStorage.getItem('selectedLanguage');
+    if(saved&&langs.some(function(l){return l.code===saved})){sel.value=saved}
+    else{sel.value=langs[0].code;localStorage.setItem('selectedLanguage',langs[0].code)}
+  });
+  sel.onchange=function(){
+    localStorage.setItem('selectedLanguage',this.value);
+    window.location.reload();
+  };
+})();
+</script>`;
+const APP_NAV = `<nav style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:4px"><span><a href="/" class="btn">Events</a> <a href="/organisations-list" class="btn">Organisations</a> <a href="/places-list" class="btn">Places</a> <span id="adminNav" style="display:none"><a href="/countries-list" class="btn">Countries</a> <a href="/cities-list" class="btn">Cities</a> <a href="/tags-list" class="btn">Tags</a> <a href="/languages-list" class="btn">Languages</a> </span><a href="/profile" class="btn">Profile</a></span><span style="display:flex;gap:4px;align-items:center"><select id="langSelect"></select><span id="cityPicker"><button id="cityBtn">All cities</button><span id="cityInputWrap" style="display:none"><input type="text" id="cityInput" placeholder="Search city..." autocomplete="off"><div class="dropdown" id="cityDrop"></div></span></span></span></nav>${NAV_SCRIPT}${LANG_PICKER_SCRIPT}`;
 
 const ORG_SEARCH_HTML = `Organisation (optional)<br><input type="text" id="orgSearch" placeholder="Search by name..." autocomplete="off"><input type="hidden" name="organisationId" id="orgId"><div class="dropdown" id="orgDrop"></div>`;
 const ORG_SEARCH_SCRIPT = `
@@ -2040,7 +2672,7 @@ document.getElementById('orgSearch').oninput=function(){
   const drop=document.getElementById('orgDrop');
   if(v.length<2){drop.style.display='none';document.getElementById('orgId').value='';return}
   debounce=setTimeout(async()=>{
-    const r=await fetch('/api/v1/organisations?name='+encodeURIComponent(v)+'&limit=10',{headers:{'Authorization':'Bearer '+localStorage.getItem('accessToken')}});
+    const r=await fetch('/api/v1/organisations?name='+encodeURIComponent(v)+'&limit=10',{headers:{'Authorization':'Bearer '+localStorage.getItem('accessToken'),'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}});
     if(!r.ok)return;
     const j=await r.json();
     drop.innerHTML='';
@@ -2065,7 +2697,7 @@ document.getElementById('placeSearch').oninput=function(){
   const drop=document.getElementById('placeDrop');
   if(v.length<2){drop.style.display='none';document.getElementById('placeId').value='';return}
   placeDebounce=setTimeout(async()=>{
-    const r=await fetch('/api/v1/places?search='+encodeURIComponent(v)+'&limit=10',{headers:{'Authorization':'Bearer '+localStorage.getItem('accessToken')}});
+    const r=await fetch('/api/v1/places?search='+encodeURIComponent(v)+'&limit=10',{headers:{'Authorization':'Bearer '+localStorage.getItem('accessToken'),'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}});
     if(!r.ok)return;
     const j=await r.json();
     drop.innerHTML='';
@@ -2099,7 +2731,7 @@ document.getElementById('tagSearch').oninput=function(){
   const drop=document.getElementById('tagDrop');
   if(v.length<1){drop.style.display='none';return}
   tagDebounce=setTimeout(async()=>{
-    const r=await fetch('/api/v1/tags?name='+encodeURIComponent(v)+'&limit=10',{headers:{'Authorization':'Bearer '+localStorage.getItem('accessToken')}});
+    const r=await fetch('/api/v1/tags?name='+encodeURIComponent(v)+'&limit=10',{headers:{'Authorization':'Bearer '+localStorage.getItem('accessToken'),'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}});
     if(!r.ok)return;
     const j=await r.json();
     drop.innerHTML='';
@@ -2126,8 +2758,7 @@ ${APP_NAV}
 <hr>
 <div id="createForm" style="display:none">
 <b>Create event</b><br>
-Title<br><input type="text" id="evTitle" required><br>
-Description<br><input type="text" id="evDescription" required><br>
+<div id="evLangFields"></div>
 ${PLACE_SEARCH_HTML}<br>
 Start<br><input type="datetime-local" id="evStart" required><br>
 End<br><input type="datetime-local" id="evEnd" required><br>
@@ -2151,27 +2782,46 @@ let me={};
 try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
 
 // --- create form (admin only) ---
+let evLanguages=[];
 if(me.role==='admin'){
   document.getElementById('createForm').style.display='block';
   ${PLACE_SEARCH_SCRIPT}
   ${ORG_SEARCH_SCRIPT}
   ${TAG_SEARCH_SCRIPT}
+  (async()=>{
+    const lr=await fetch('/api/v1/languages',{headers:{'Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}});
+    if(lr.ok){
+      evLanguages=await lr.json();
+      const c=document.getElementById('evLangFields');c.innerHTML='';
+      for(const l of evLanguages){
+        const lbl1=document.createElement('label');lbl1.textContent='Title ('+l.name+')';
+        const inp1=document.createElement('input');inp1.type='text';inp1.id='evTitle_'+l.code;inp1.placeholder='Title in '+l.name;inp1.required=true;
+        const lbl2=document.createElement('label');lbl2.textContent='Description ('+l.name+')';
+        const inp2=document.createElement('input');inp2.type='text';inp2.id='evDesc_'+l.code;inp2.placeholder='Description in '+l.name;inp2.required=true;
+        c.appendChild(lbl1);c.appendChild(document.createElement('br'));c.appendChild(inp1);c.appendChild(document.createElement('br'));
+        c.appendChild(lbl2);c.appendChild(document.createElement('br'));c.appendChild(inp2);c.appendChild(document.createElement('br'));
+      }
+    }
+  })();
   document.getElementById('createBtn').onclick=async()=>{
-    const title=document.getElementById('evTitle').value.trim();
-    const description=document.getElementById('evDescription').value.trim();
+    const translations=[];
+    for(const l of evLanguages){
+      const ti=document.getElementById('evTitle_'+l.code);
+      const de=document.getElementById('evDesc_'+l.code);
+      if(ti&&ti.value.trim()&&de)translations.push({languageCode:l.code,title:ti.value.trim(),description:de.value.trim()});
+    }
     const placeId=document.getElementById('placeId').value;
     const startDate=document.getElementById('evStart').value;
     const endDate=document.getElementById('evEnd').value;
     const organisationId=document.getElementById('orgId').value;
-    if(!title||!description||!placeId||!startDate||!endDate){document.getElementById('err').textContent='Please fill all required fields';return}
-    const body={title,description,placeId,startDate:new Date(startDate).toISOString(),endDate:new Date(endDate).toISOString()};
+    if(translations.length===0||!placeId||!startDate||!endDate){document.getElementById('err').textContent='Please fill all required fields';return}
+    const body={translations,placeId,startDate:new Date(startDate).toISOString(),endDate:new Date(endDate).toISOString()};
     if(organisationId)body.organisationId=organisationId;
     body.tagIds=selectedTags.map(t2=>t2.id);
-    const r=await fetch('/api/v1/events',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify(body)});
+    const r=await fetch('/api/v1/events',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify(body)});
     if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
     document.getElementById('err').textContent='';
-    document.getElementById('evTitle').value='';
-    document.getElementById('evDescription').value='';
+    for(const l of evLanguages){const ti=document.getElementById('evTitle_'+l.code);const de=document.getElementById('evDesc_'+l.code);if(ti)ti.value='';if(de)de.value=''}
     document.getElementById('placeId').value='';
     document.getElementById('placeSearch').value='';
     document.getElementById('evStart').value='';
@@ -2217,7 +2867,7 @@ async function load(){
   let url='/api/v1/events?page='+page+'&limit='+limit;
   if(searchTerm)url+='&search='+encodeURIComponent(searchTerm);
   var sc=localStorage.getItem('selectedCityId');if(sc)url+='&cityId='+sc;
-  const r=await fetch(url,{headers:{'Authorization':'Bearer '+t}});
+  const r=await fetch(url,{headers:{'Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}});
   if(!r.ok){loading=false;document.getElementById('loading').style.display='none';return}
   const j=await r.json();
   const list=document.getElementById('list');
@@ -2296,7 +2946,7 @@ if(me.role==='admin'){
   document.getElementById('createBtn').onclick=async()=>{
     const name=document.getElementById('orgName').value.trim();
     if(!name)return;
-    const r=await fetch('/api/v1/organisations',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name})});
+    const r=await fetch('/api/v1/organisations',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify({name})});
     if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
     document.getElementById('orgName').value='';
     document.getElementById('err').textContent='';
@@ -2336,7 +2986,7 @@ async function load(){
   let url='/api/v1/organisations?page='+page+'&limit='+limit;
   if(searchTerm)url+='&name='+encodeURIComponent(searchTerm);
   if(onlyFavourites)url+='&onlyFavourites=true';
-  const r=await fetch(url,{headers:{'Authorization':'Bearer '+t}});
+  const r=await fetch(url,{headers:{'Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}});
   if(!r.ok){loading=false;document.getElementById('loading').style.display='none';return}
   const j=await r.json();
   const list=document.getElementById('list');
@@ -2366,7 +3016,7 @@ async function load(){
         await fetch('/api/v1/favourite-organisations/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
         a.dataset.fav='false';a.textContent='Add to favourites';
       }else{
-        await fetch('/api/v1/favourite-organisations',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({organisationId:a.dataset.id})});
+        await fetch('/api/v1/favourite-organisations',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify({organisationId:a.dataset.id})});
         a.dataset.fav='true';a.textContent='Remove from favourites';
       }
     };
@@ -2402,7 +3052,7 @@ const t=localStorage.getItem('accessToken');
 let me={};
 try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
 (async()=>{
-  const r=await fetch('/api/v1/events/'+id,{headers:{'Authorization':'Bearer '+t}});
+  const r=await fetch('/api/v1/events/'+id,{headers:{'Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}});
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const ev=await r.json();
   document.getElementById('bc').innerHTML='<a href="/">Events</a> / '+esc(ev.title);
@@ -2456,7 +3106,7 @@ const t=localStorage.getItem('accessToken');
 let me={};
 try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
 (async()=>{
-  const r=await fetch('/api/v1/organisations/'+id,{headers:{'Authorization':'Bearer '+t}});
+  const r=await fetch('/api/v1/organisations/'+id,{headers:{'Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}});
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const o=await r.json();
   document.getElementById('bc').innerHTML='<a href="/organisations-list">Organisations</a> / '+esc(o.name);
@@ -2494,7 +3144,7 @@ async function loadEvents(){
   if(evLoading||evDone)return;
   evLoading=true;
   document.getElementById('loading').style.display='block';
-  const r=await fetch('/api/v1/organisations/'+id+'/events?page='+evPage+'&limit='+evLimit,{headers:{'Authorization':'Bearer '+t}});
+  const r=await fetch('/api/v1/organisations/'+id+'/events?page='+evPage+'&limit='+evLimit,{headers:{'Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}});
   if(!r.ok){evLoading=false;document.getElementById('loading').style.display='none';return}
   const j=await r.json();
   const list=document.getElementById('list');
@@ -2548,7 +3198,7 @@ if(!localStorage.getItem('accessToken'))window.location.href='/login';
 const t=localStorage.getItem('accessToken');
 const id=window.location.pathname.split('/').pop();
 (async()=>{
-  const r=await fetch('/api/v1/places/'+id,{headers:{'Authorization':'Bearer '+t}});
+  const r=await fetch('/api/v1/places/'+id,{headers:{'Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}});
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const p=await r.json();
   document.getElementById('bc').innerHTML='<a href="/places-list">Places</a> / '+esc(p.name);
@@ -2575,7 +3225,7 @@ async function loadEvents(){
   if(evLoading||evDone)return;
   evLoading=true;
   document.getElementById('loading').style.display='block';
-  const r=await fetch('/api/v1/places/'+id+'/events?page='+evPage+'&limit='+evLimit,{headers:{'Authorization':'Bearer '+t}});
+  const r=await fetch('/api/v1/places/'+id+'/events?page='+evPage+'&limit='+evLimit,{headers:{'Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}});
   if(!r.ok){evLoading=false;document.getElementById('loading').style.display='none';return}
   const j=await r.json();
   const list=document.getElementById('list');
@@ -2617,8 +3267,7 @@ ${APP_NAV}
 <hr>
 <p class="bc" id="bc"><a href="/">Events</a> /</p>
 <form id="f">
-Title<br><input type="text" name="title" required><br>
-Description<br><input type="text" name="description" required><br>
+<div id="evLangFields"></div>
 ${PLACE_SEARCH_HTML}<br>
 Start<br><input type="datetime-local" name="startDate" required><br>
 End<br><input type="datetime-local" name="endDate" required><br>
@@ -2632,19 +3281,33 @@ ${TAG_SEARCH_HTML}<br>
 if(!localStorage.getItem('accessToken'))window.location.href='/login';
 try{const p=JSON.parse(atob(localStorage.getItem('accessToken').split('.')[1]));if(p.role!=='admin')window.location.href='/'}catch{window.location.href='/login'}
 const eventId=window.location.pathname.split('/').pop();
+const _t=localStorage.getItem('accessToken');
+const hdr={headers:{'Authorization':'Bearer '+_t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}};
+let evLanguages=[];
+function _esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 ${PLACE_SEARCH_SCRIPT}
 ${ORG_SEARCH_SCRIPT}
 ${TAG_SEARCH_SCRIPT}
 (async()=>{
-  const _t=localStorage.getItem('accessToken');
-  const r=await fetch('/api/v1/events/'+eventId,{headers:{'Authorization':'Bearer '+_t}});
+  const lr=await fetch('/api/v1/languages',hdr);
+  if(lr.ok){
+    evLanguages=await lr.json();
+    const c=document.getElementById('evLangFields');c.innerHTML='';
+    for(const l of evLanguages){
+      const lbl1=document.createElement('label');lbl1.textContent='Title ('+l.name+')';
+      const inp1=document.createElement('input');inp1.type='text';inp1.id='evTitle_'+l.code;inp1.placeholder='Title in '+l.name;inp1.required=true;
+      const lbl2=document.createElement('label');lbl2.textContent='Description ('+l.name+')';
+      const inp2=document.createElement('input');inp2.type='text';inp2.id='evDesc_'+l.code;inp2.placeholder='Description in '+l.name;inp2.required=true;
+      c.appendChild(lbl1);c.appendChild(document.createElement('br'));c.appendChild(inp1);c.appendChild(document.createElement('br'));
+      c.appendChild(lbl2);c.appendChild(document.createElement('br'));c.appendChild(inp2);c.appendChild(document.createElement('br'));
+    }
+  }
+  const r=await fetch('/api/v1/events/'+eventId+'?allTranslations=true',hdr);
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const ev=await r.json();
-  function _esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
   document.getElementById('bc').innerHTML='<a href="/">Events</a> / <a href="/view/event/'+eventId+'">'+_esc(ev.title)+'</a> / Edit';
+  if(ev.translations){for(const tr of ev.translations){const ti=document.getElementById('evTitle_'+tr.languageCode);const de=document.getElementById('evDesc_'+tr.languageCode);if(ti)ti.value=tr.title;if(de)de.value=tr.description}}
   const f=document.getElementById('f');
-  f.title.value=ev.title;
-  f.description.value=ev.description;
   f.startDate.value=ev.startDate.slice(0,16);
   f.endDate.value=ev.endDate.slice(0,16);
   if(ev.placeId){
@@ -2653,7 +3316,7 @@ ${TAG_SEARCH_SCRIPT}
   }
   if(ev.organisationId){
     document.getElementById('orgId').value=ev.organisationId;
-    const or=await fetch('/api/v1/organisations/'+ev.organisationId,{headers:{'Authorization':'Bearer '+_t}});
+    const or=await fetch('/api/v1/organisations/'+ev.organisationId,hdr);
     if(or.ok){const oj=await or.json();document.getElementById('orgSearch').value=oj.name}
   }
   if(ev.tags&&ev.tags.length>0){selectedTags=ev.tags;renderTagChips()}
@@ -2662,11 +3325,18 @@ document.getElementById('f').onsubmit=async e=>{
   e.preventDefault();
   const fd=Object.fromEntries(new FormData(e.target));
   if(!fd.placeId){document.getElementById('err').textContent='Please select a place';return}
-  const body={title:fd.title,description:fd.description,placeId:fd.placeId,startDate:new Date(fd.startDate).toISOString(),endDate:new Date(fd.endDate).toISOString()};
+  const translations=[];
+  for(const l of evLanguages){
+    const ti=document.getElementById('evTitle_'+l.code);
+    const de=document.getElementById('evDesc_'+l.code);
+    if(ti&&ti.value.trim()&&de)translations.push({languageCode:l.code,title:ti.value.trim(),description:de.value.trim()});
+  }
+  if(translations.length===0){document.getElementById('err').textContent='Please fill at least one translation';return}
+  const body={translations,placeId:fd.placeId,startDate:new Date(fd.startDate).toISOString(),endDate:new Date(fd.endDate).toISOString()};
   if(fd.organisationId)body.organisationId=fd.organisationId;
   else body.organisationId=null;
   body.tagIds=selectedTags.map(t2=>t2.id);
-  const r=await fetch('/api/v1/events/'+eventId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('accessToken')},body:JSON.stringify(body)});
+  const r=await fetch('/api/v1/events/'+eventId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+_t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify(body)});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
   window.location.href='/view/event/'+eventId;
 };
@@ -2693,7 +3363,7 @@ if(!localStorage.getItem('accessToken'))window.location.href='/login';
 try{const p=JSON.parse(atob(localStorage.getItem('accessToken').split('.')[1]));if(p.role!=='admin')window.location.href='/'}catch{window.location.href='/login'}
 const orgId=window.location.pathname.split('/').pop();
 (async()=>{
-  const r=await fetch('/api/v1/organisations/'+orgId,{headers:{'Authorization':'Bearer '+localStorage.getItem('accessToken')}});
+  const r=await fetch('/api/v1/organisations/'+orgId,{headers:{'Authorization':'Bearer '+localStorage.getItem('accessToken'),'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}});
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const o=await r.json();
   function _esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
@@ -2703,7 +3373,7 @@ const orgId=window.location.pathname.split('/').pop();
 document.getElementById('f').onsubmit=async e=>{
   e.preventDefault();
   const fd=Object.fromEntries(new FormData(e.target));
-  const r=await fetch('/api/v1/organisations/'+orgId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('accessToken')},body:JSON.stringify({name:fd.name})});
+  const r=await fetch('/api/v1/organisations/'+orgId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('accessToken'),'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify({name:fd.name})});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
   window.location.href='/view/organisation/'+orgId;
 };
@@ -2723,13 +3393,13 @@ ${APP_NAV}
 <p class="bc">Countries /</p>
 <div id="createForm">
 <b>Add country</b><br>
-<input type="text" id="countryName" placeholder="Country name" required>
+<div id="createLangFields"></div>
 <button id="createBtn">Create</button>
 </div>
 <br>
 <div id="editForm" style="display:none">
 <b>Edit country</b><br>
-<input type="text" id="editName" placeholder="Country name" required>
+<div id="editLangFields"></div>
 <button id="saveBtn">Save</button> <button id="cancelBtn">Cancel</button>
 </div>
 <hr>
@@ -2740,23 +3410,51 @@ ${APP_NAV}
 if(!localStorage.getItem('accessToken'))window.location.href='/login';
 try{const p=JSON.parse(atob(localStorage.getItem('accessToken').split('.')[1]));if(p.role!=='admin')window.location.href='/'}catch{window.location.href='/login'}
 const t=localStorage.getItem('accessToken');
+const hdr={headers:{'Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}};
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 let editId=null;
+let languages=[];
+
+async function loadLanguages(){
+  const r=await fetch('/api/v1/languages',hdr);
+  if(!r.ok)return;
+  languages=await r.json();
+  renderLangFields('createLangFields','create');
+  renderLangFields('editLangFields','edit');
+}
+function renderLangFields(containerId,prefix){
+  const c=document.getElementById(containerId);c.innerHTML='';
+  for(const l of languages){
+    const lbl=document.createElement('label');
+    lbl.textContent='Name ('+l.name+')';
+    const inp=document.createElement('input');
+    inp.type='text';inp.id=prefix+'_name_'+l.code;inp.placeholder='Name in '+l.name;inp.required=true;
+    c.appendChild(lbl);c.appendChild(document.createElement('br'));c.appendChild(inp);
+  }
+}
+function getTranslations(prefix){
+  const tr=[];
+  for(const l of languages){
+    const inp=document.getElementById(prefix+'_name_'+l.code);
+    if(inp&&inp.value.trim())tr.push({languageCode:l.code,name:inp.value.trim()});
+  }
+  return tr;
+}
 
 document.getElementById('createBtn').onclick=async()=>{
-  const name=document.getElementById('countryName').value.trim();
-  if(!name)return;
-  const r=await fetch('/api/v1/countries',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name})});
+  const translations=getTranslations('create');
+  if(translations.length===0)return;
+  const r=await fetch('/api/v1/countries',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify({translations})});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
-  document.getElementById('countryName').value='';
+  for(const l of languages){const inp=document.getElementById('create_name_'+l.code);if(inp)inp.value=''}
   document.getElementById('err').textContent='';
   loadList();
 };
 
 document.getElementById('saveBtn').onclick=async()=>{
-  const name=document.getElementById('editName').value.trim();
-  if(!name||!editId)return;
-  const r=await fetch('/api/v1/countries/'+editId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name})});
+  const translations=getTranslations('edit');
+  if(translations.length===0||!editId)return;
+  const r=await fetch('/api/v1/countries/'+editId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify({translations})});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
   document.getElementById('editForm').style.display='none';
   document.getElementById('createForm').style.display='block';
@@ -2772,21 +3470,25 @@ document.getElementById('cancelBtn').onclick=()=>{
 };
 
 async function loadList(){
-  const r=await fetch('/api/v1/countries?limit=100',{headers:{'Authorization':'Bearer '+t}});
+  const r=await fetch('/api/v1/countries?limit=100',hdr);
   if(!r.ok)return;
   const j=await r.json();
   const list=document.getElementById('list');
   list.innerHTML='';
   for(const c of j.data){
     const d=document.createElement('div');
-    d.innerHTML='<b>'+esc(c.name)+'</b><div style="margin-top:8px"><a href="#" class="btn edit" data-id="'+c.id+'" data-name="'+esc(c.name)+'">edit</a> <a href="#" class="btn del" data-id="'+c.id+'">delete</a></div><hr>';
+    d.innerHTML='<b>'+esc(c.name)+'</b><div style="margin-top:8px"><a href="#" class="btn edit" data-id="'+c.id+'">edit</a> <a href="#" class="btn del" data-id="'+c.id+'">delete</a></div><hr>';
     list.appendChild(d);
   }
   list.querySelectorAll('.edit').forEach(a=>{
-    a.onclick=e=>{
+    a.onclick=async e=>{
       e.preventDefault();
       editId=a.dataset.id;
-      document.getElementById('editName').value=a.dataset.name;
+      const r2=await fetch('/api/v1/countries/'+a.dataset.id+'?allTranslations=true',hdr);
+      if(!r2.ok)return;
+      const c=await r2.json();
+      renderLangFields('editLangFields','edit');
+      if(c.translations){for(const tr of c.translations){const inp=document.getElementById('edit_name_'+tr.languageCode);if(inp)inp.value=tr.name}}
       document.getElementById('editForm').style.display='block';
       document.getElementById('createForm').style.display='none';
     };
@@ -2794,14 +3496,14 @@ async function loadList(){
   list.querySelectorAll('.del').forEach(a=>{
     a.onclick=async e=>{
       e.preventDefault();
-      const r=await fetch('/api/v1/countries/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
+      const r=await fetch('/api/v1/countries/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}});
       if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
       document.getElementById('err').textContent='';
       loadList();
     };
   });
 }
-loadList();
+loadLanguages().then(()=>loadList());
 </script>
 </body></html>`);
 });
@@ -2816,14 +3518,14 @@ ${APP_NAV}
 <p class="bc">Cities /</p>
 <div id="createForm">
 <b>Add city</b><br>
-Name<br><input type="text" id="cityName" placeholder="City name" required><br>
+<div id="createLangFields"></div>
 Country<br><select id="countrySelect"><option value="">-- select --</option></select><br><br>
 <button id="createBtn">Create</button>
 </div>
 <br>
 <div id="editForm" style="display:none">
 <b>Edit city</b><br>
-Name<br><input type="text" id="editName" placeholder="City name" required><br>
+<div id="editLangFields"></div>
 Country<br><select id="editCountrySelect"><option value="">-- select --</option></select><br><br>
 <button id="saveBtn">Save</button> <button id="cancelBtn">Cancel</button>
 </div>
@@ -2840,9 +3542,37 @@ const t=localStorage.getItem('accessToken');
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 let editId=null;
 let countries=[];
+let languages=[];
+const hdr={headers:{'Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}};
+
+async function loadLanguages(){
+  const r=await fetch('/api/v1/languages',hdr);
+  if(!r.ok)return;
+  languages=await r.json();
+  renderLangFields('createLangFields','create');
+  renderLangFields('editLangFields','edit');
+}
+function renderLangFields(containerId,prefix){
+  const c=document.getElementById(containerId);c.innerHTML='';
+  for(const l of languages){
+    const lbl=document.createElement('label');
+    lbl.textContent='Name ('+l.name+')';
+    const inp=document.createElement('input');
+    inp.type='text';inp.id=prefix+'_name_'+l.code;inp.placeholder='Name in '+l.name;inp.required=true;
+    c.appendChild(lbl);c.appendChild(document.createElement('br'));c.appendChild(inp);
+  }
+}
+function getTranslations(prefix){
+  const tr=[];
+  for(const l of languages){
+    const inp=document.getElementById(prefix+'_name_'+l.code);
+    if(inp&&inp.value.trim())tr.push({languageCode:l.code,name:inp.value.trim()});
+  }
+  return tr;
+}
 
 async function loadCountries(){
-  const r=await fetch('/api/v1/countries?limit=100',{headers:{'Authorization':'Bearer '+t}});
+  const r=await fetch('/api/v1/countries?limit=100',hdr);
   if(!r.ok)return;
   const j=await r.json();
   countries=j.data;
@@ -2863,21 +3593,21 @@ async function loadCountries(){
 document.getElementById('filterCountry').onchange=()=>loadList();
 
 document.getElementById('createBtn').onclick=async()=>{
-  const name=document.getElementById('cityName').value.trim();
+  const translations=getTranslations('create');
   const countryId=document.getElementById('countrySelect').value;
-  if(!name||!countryId)return;
-  const r=await fetch('/api/v1/cities',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name,countryId})});
+  if(translations.length===0||!countryId)return;
+  const r=await fetch('/api/v1/cities',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify({translations,countryId})});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
-  document.getElementById('cityName').value='';
+  for(const l of languages){const inp=document.getElementById('create_name_'+l.code);if(inp)inp.value=''}
   document.getElementById('err').textContent='';
   loadList();
 };
 
 document.getElementById('saveBtn').onclick=async()=>{
-  const name=document.getElementById('editName').value.trim();
+  const translations=getTranslations('edit');
   const countryId=document.getElementById('editCountrySelect').value;
-  if(!name||!countryId||!editId)return;
-  const r=await fetch('/api/v1/cities/'+editId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name,countryId})});
+  if(translations.length===0||!countryId||!editId)return;
+  const r=await fetch('/api/v1/cities/'+editId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify({translations,countryId})});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
   document.getElementById('editForm').style.display='none';
   document.getElementById('createForm').style.display='block';
@@ -2896,21 +3626,25 @@ async function loadList(){
   const countryId=document.getElementById('filterCountry').value;
   let url='/api/v1/cities?limit=100';
   if(countryId)url+='&countryId='+countryId;
-  const r=await fetch(url,{headers:{'Authorization':'Bearer '+t}});
+  const r=await fetch(url,{headers:{'Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}});
   if(!r.ok)return;
   const j=await r.json();
   const list=document.getElementById('list');
   list.innerHTML='';
   for(const c of j.data){
     const d=document.createElement('div');
-    d.innerHTML='<b>'+esc(c.name)+'</b> <small>('+esc(c.countryName)+')</small><div style="margin-top:8px"><a href="#" class="btn edit" data-id="'+c.id+'" data-name="'+esc(c.name)+'" data-country="'+c.countryId+'">edit</a> <a href="#" class="btn del" data-id="'+c.id+'">delete</a></div><hr>';
+    d.innerHTML='<b>'+esc(c.name)+'</b> <small>('+esc(c.countryName)+')</small><div style="margin-top:8px"><a href="#" class="btn edit" data-id="'+c.id+'" data-country="'+c.countryId+'">edit</a> <a href="#" class="btn del" data-id="'+c.id+'">delete</a></div><hr>';
     list.appendChild(d);
   }
   list.querySelectorAll('.edit').forEach(a=>{
-    a.onclick=e=>{
+    a.onclick=async e=>{
       e.preventDefault();
       editId=a.dataset.id;
-      document.getElementById('editName').value=a.dataset.name;
+      const r2=await fetch('/api/v1/cities/'+a.dataset.id+'?allTranslations=true',hdr);
+      if(!r2.ok)return;
+      const ci=await r2.json();
+      renderLangFields('editLangFields','edit');
+      if(ci.translations){for(const tr of ci.translations){const inp=document.getElementById('edit_name_'+tr.languageCode);if(inp)inp.value=tr.name}}
       document.getElementById('editCountrySelect').value=a.dataset.country;
       document.getElementById('editForm').style.display='block';
       document.getElementById('createForm').style.display='none';
@@ -2926,7 +3660,7 @@ async function loadList(){
     };
   });
 }
-loadCountries().then(()=>loadList());
+loadLanguages().then(()=>loadCountries()).then(()=>loadList());
 </script>
 </body></html>`);
 });
@@ -2977,7 +3711,7 @@ if(me.role==='admin'){
   document.getElementById('createForm').style.display='block';
 
   async function loadCities(){
-    const r=await fetch('/api/v1/cities?limit=100',{headers:{'Authorization':'Bearer '+t}});
+    const r=await fetch('/api/v1/cities?limit=100',{headers:{'Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}});
     if(!r.ok)return;
     const j=await r.json();
     for(const sel of [document.getElementById('citySelect'),document.getElementById('editCitySelect')]){
@@ -3002,7 +3736,7 @@ if(me.role==='admin'){
     const longitude=Number(document.getElementById('placeLng').value);
     const cityId=document.getElementById('citySelect').value;
     if(!name||!address||!cityId)return;
-    const r=await fetch('/api/v1/places',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name,address,latitude,longitude,cityId})});
+    const r=await fetch('/api/v1/places',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify({name,address,latitude,longitude,cityId})});
     if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
     document.getElementById('placeName').value='';
     document.getElementById('placeAddress').value='';
@@ -3022,7 +3756,7 @@ if(me.role==='admin'){
     const longitude=Number(document.getElementById('editLng').value);
     const cityId=document.getElementById('editCitySelect').value;
     if(!name||!address||!cityId||!editId)return;
-    const r=await fetch('/api/v1/places/'+editId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name,address,latitude,longitude,cityId})});
+    const r=await fetch('/api/v1/places/'+editId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify({name,address,latitude,longitude,cityId})});
     if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
     document.getElementById('editForm').style.display='none';
     document.getElementById('createForm').style.display='block';
@@ -3072,7 +3806,7 @@ async function load(){
   if(searchTerm)url+='&search='+encodeURIComponent(searchTerm);
   if(onlyFavourites)url+='&onlyFavourites=true';
   var sc=localStorage.getItem('selectedCityId');if(sc)url+='&cityId='+sc;
-  const r=await fetch(url,{headers:{'Authorization':'Bearer '+t}});
+  const r=await fetch(url,{headers:{'Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}});
   if(!r.ok){loading=false;document.getElementById('loading').style.display='none';return}
   const j=await r.json();
   const list=document.getElementById('list');
@@ -3120,7 +3854,7 @@ async function load(){
         await fetch('/api/v1/favourite-places/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
         a.dataset.fav='false';a.textContent='Add to favourites';
       }else{
-        await fetch('/api/v1/favourite-places',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({placeId:a.dataset.id})});
+        await fetch('/api/v1/favourite-places',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify({placeId:a.dataset.id})});
         a.dataset.fav='true';a.textContent='Remove from favourites';
       }
     };
@@ -3148,13 +3882,13 @@ ${APP_NAV}
 <hr>
 <div id="createForm">
 <b>Add tag</b><br>
-<input type="text" id="tagName" placeholder="Tag name" required>
+<div id="createLangFields"></div>
 <button id="createBtn">Create</button>
 </div>
 <br>
 <div id="editForm" style="display:none">
 <b>Edit tag</b><br>
-<input type="text" id="editName" placeholder="Tag name" required>
+<div id="editLangFields"></div>
 <button id="saveBtn">Save</button> <button id="cancelBtn">Cancel</button>
 </div>
 <p id="err"></p>
@@ -3171,13 +3905,41 @@ try{const p=JSON.parse(atob(localStorage.getItem('accessToken').split('.')[1]));
 const t=localStorage.getItem('accessToken');
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 let editId=null;
+let languages=[];
+const hdr={headers:{'Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}};
+
+async function loadLanguages(){
+  const r=await fetch('/api/v1/languages',hdr);
+  if(!r.ok)return;
+  languages=await r.json();
+  renderLangFields('createLangFields','create');
+  renderLangFields('editLangFields','edit');
+}
+function renderLangFields(containerId,prefix){
+  const c=document.getElementById(containerId);c.innerHTML='';
+  for(const l of languages){
+    const lbl=document.createElement('label');
+    lbl.textContent='Name ('+l.name+')';
+    const inp=document.createElement('input');
+    inp.type='text';inp.id=prefix+'_name_'+l.code;inp.placeholder='Name in '+l.name;inp.required=true;
+    c.appendChild(lbl);c.appendChild(document.createElement('br'));c.appendChild(inp);
+  }
+}
+function getTranslations(prefix){
+  const tr=[];
+  for(const l of languages){
+    const inp=document.getElementById(prefix+'_name_'+l.code);
+    if(inp&&inp.value.trim())tr.push({languageCode:l.code,name:inp.value.trim()});
+  }
+  return tr;
+}
 
 document.getElementById('createBtn').onclick=async()=>{
-  const name=document.getElementById('tagName').value.trim();
-  if(!name)return;
-  const r=await fetch('/api/v1/tags',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name})});
+  const translations=getTranslations('create');
+  if(translations.length===0)return;
+  const r=await fetch('/api/v1/tags',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify({translations})});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
-  document.getElementById('tagName').value='';
+  for(const l of languages){const inp=document.getElementById('create_name_'+l.code);if(inp)inp.value=''}
   document.getElementById('err').textContent='';
   page=1;done=false;
   document.getElementById('list').innerHTML='';
@@ -3186,9 +3948,9 @@ document.getElementById('createBtn').onclick=async()=>{
 };
 
 document.getElementById('saveBtn').onclick=async()=>{
-  const name=document.getElementById('editName').value.trim();
-  if(!name||!editId)return;
-  const r=await fetch('/api/v1/tags/'+editId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name})});
+  const translations=getTranslations('edit');
+  if(translations.length===0||!editId)return;
+  const r=await fetch('/api/v1/tags/'+editId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify({translations})});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
   document.getElementById('editForm').style.display='none';
   document.getElementById('createForm').style.display='block';
@@ -3226,7 +3988,7 @@ async function load(){
   document.getElementById('loading').style.display='block';
   let url='/api/v1/tags?page='+page+'&limit='+limit;
   if(searchTerm)url+='&name='+encodeURIComponent(searchTerm);
-  const r=await fetch(url,{headers:{'Authorization':'Bearer '+t}});
+  const r=await fetch(url,{headers:{'Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}});
   if(!r.ok){loading=false;document.getElementById('loading').style.display='none';return}
   const j=await r.json();
   const list=document.getElementById('list');
@@ -3236,10 +3998,14 @@ async function load(){
     list.appendChild(d);
   }
   list.querySelectorAll('.edit').forEach(a=>{
-    a.onclick=e=>{
+    a.onclick=async e=>{
       e.preventDefault();
       editId=a.dataset.id;
-      document.getElementById('editName').value=a.dataset.name;
+      const r2=await fetch('/api/v1/tags/'+a.dataset.id+'?allTranslations=true',hdr);
+      if(!r2.ok)return;
+      const tg=await r2.json();
+      renderLangFields('editLangFields','edit');
+      if(tg.translations){for(const tr of tg.translations){const inp=document.getElementById('edit_name_'+tr.languageCode);if(inp)inp.value=tr.name}}
       document.getElementById('editForm').style.display='block';
       document.getElementById('createForm').style.display='none';
     };
@@ -3261,7 +4027,7 @@ async function load(){
 window.addEventListener('scroll',()=>{
   if(window.innerHeight+window.scrollY>=document.body.offsetHeight-200)load();
 });
-load();
+loadLanguages().then(()=>load());
 </script>
 </body></html>`);
 });
@@ -3275,7 +4041,7 @@ ${APP_NAV}
 <hr>
 <p class="bc" id="bc"><a href="/tags-list">Tags</a> /</p>
 <form id="f">
-Name<br><input type="text" name="name" minlength="1" maxlength="256" required><br><br>
+<div id="langFields"></div><br>
 <button type="submit">Update</button>
 </form>
 <p id="err"></p>
@@ -3284,21 +4050,144 @@ Name<br><input type="text" name="name" minlength="1" maxlength="256" required><b
 if(!localStorage.getItem('accessToken'))window.location.href='/login';
 try{const p=JSON.parse(atob(localStorage.getItem('accessToken').split('.')[1]));if(p.role!=='admin')window.location.href='/'}catch{window.location.href='/login'}
 const tagId=window.location.pathname.split('/').pop();
+const _t=localStorage.getItem('accessToken');
+const hdr={headers:{'Authorization':'Bearer '+_t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}};
+let languages=[];
+function _esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+
+async function loadLanguages(){
+  const r=await fetch('/api/v1/languages',hdr);
+  if(!r.ok)return;
+  languages=await r.json();
+  const c=document.getElementById('langFields');c.innerHTML='';
+  for(const l of languages){
+    const lbl=document.createElement('label');
+    lbl.textContent='Name ('+l.name+')';
+    const inp=document.createElement('input');
+    inp.type='text';inp.id='name_'+l.code;inp.placeholder='Name in '+l.name;inp.required=true;
+    c.appendChild(lbl);c.appendChild(document.createElement('br'));c.appendChild(inp);
+  }
+}
+
 (async()=>{
-  const r=await fetch('/api/v1/tags/'+tagId,{headers:{'Authorization':'Bearer '+localStorage.getItem('accessToken')}});
+  await loadLanguages();
+  const r=await fetch('/api/v1/tags/'+tagId+'?allTranslations=true',hdr);
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const tag=await r.json();
-  function _esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
   document.getElementById('bc').innerHTML='<a href="/tags-list">Tags</a> / '+_esc(tag.name)+' / Edit';
-  document.getElementById('f').name.value=tag.name;
+  if(tag.translations){for(const tr of tag.translations){const inp=document.getElementById('name_'+tr.languageCode);if(inp)inp.value=tr.name}}
 })();
 document.getElementById('f').onsubmit=async e=>{
   e.preventDefault();
-  const fd=Object.fromEntries(new FormData(e.target));
-  const r=await fetch('/api/v1/tags/'+tagId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('accessToken')},body:JSON.stringify({name:fd.name})});
+  const translations=[];
+  for(const l of languages){
+    const inp=document.getElementById('name_'+l.code);
+    if(inp&&inp.value.trim())translations.push({languageCode:l.code,name:inp.value.trim()});
+  }
+  if(translations.length===0)return;
+  const r=await fetch('/api/v1/tags/'+tagId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+_t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify({translations})});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
   window.location.href='/tags-list';
 };
+</script>
+</body></html>`);
+});
+
+app.get('/languages-list', (_req: Request, res: Response) => {
+  res.type('html').send(`<!DOCTYPE html>
+<html><head><title>Events</title>${PAGE_HEAD}</head><body>
+<div class="c">
+<h1>Events</h1>
+${APP_NAV}
+<hr>
+<p class="bc">Languages /</p>
+<div id="createForm">
+<b>Add language</b><br>
+Code<br><input type="text" id="langCode" placeholder="e.g. en, pl" required style="width:100px"><br>
+Name<br><input type="text" id="langName" placeholder="e.g. English, Polish" required>
+<button id="createBtn">Create</button>
+</div>
+<br>
+<div id="editForm" style="display:none">
+<b>Edit language</b><br>
+Code<br><input type="text" id="editCode" placeholder="e.g. en, pl" required style="width:100px"><br>
+Name<br><input type="text" id="editLangName" placeholder="e.g. English" required>
+<button id="saveBtn">Save</button> <button id="cancelBtn">Cancel</button>
+</div>
+<hr>
+<div id="list"></div>
+<p id="err"></p>
+</div>
+<script>
+if(!localStorage.getItem('accessToken'))window.location.href='/login';
+try{const p=JSON.parse(atob(localStorage.getItem('accessToken').split('.')[1]));if(p.role!=='admin')window.location.href='/'}catch{window.location.href='/login'}
+const t=localStorage.getItem('accessToken');
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+let editId=null;
+
+document.getElementById('createBtn').onclick=async()=>{
+  const code=document.getElementById('langCode').value.trim();
+  const name=document.getElementById('langName').value.trim();
+  if(!code||!name)return;
+  const r=await fetch('/api/v1/languages',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify({code,name})});
+  if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+  document.getElementById('langCode').value='';
+  document.getElementById('langName').value='';
+  document.getElementById('err').textContent='';
+  loadList();
+};
+
+document.getElementById('saveBtn').onclick=async()=>{
+  const code=document.getElementById('editCode').value.trim();
+  const name=document.getElementById('editLangName').value.trim();
+  if(!code||!name||!editId)return;
+  const r=await fetch('/api/v1/languages/'+editId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify({code,name})});
+  if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+  document.getElementById('editForm').style.display='none';
+  document.getElementById('createForm').style.display='block';
+  editId=null;
+  document.getElementById('err').textContent='';
+  loadList();
+};
+
+document.getElementById('cancelBtn').onclick=()=>{
+  document.getElementById('editForm').style.display='none';
+  document.getElementById('createForm').style.display='block';
+  editId=null;
+};
+
+async function loadList(){
+  const r=await fetch('/api/v1/languages',{headers:{'Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}});
+  if(!r.ok)return;
+  const langs=await r.json();
+  const list=document.getElementById('list');
+  list.innerHTML='';
+  for(const l of langs){
+    const d=document.createElement('div');
+    d.innerHTML='<b>'+esc(l.code)+'</b> - '+esc(l.name)+'<div style="margin-top:8px"><a href="#" class="btn edit" data-id="'+l.id+'" data-code="'+esc(l.code)+'" data-name="'+esc(l.name)+'">edit</a> <a href="#" class="btn del" data-id="'+l.id+'">delete</a></div><hr>';
+    list.appendChild(d);
+  }
+  list.querySelectorAll('.edit').forEach(a=>{
+    a.onclick=e=>{
+      e.preventDefault();
+      editId=a.dataset.id;
+      document.getElementById('editCode').value=a.dataset.code;
+      document.getElementById('editLangName').value=a.dataset.name;
+      document.getElementById('editForm').style.display='block';
+      document.getElementById('createForm').style.display='none';
+    };
+  });
+  list.querySelectorAll('.del').forEach(a=>{
+    a.onclick=async e=>{
+      e.preventDefault();
+      const r=await fetch('/api/v1/languages/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'}});
+      if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+      document.getElementById('err').textContent='';
+      loadList();
+    };
+  });
+}
+loadList();
 </script>
 </body></html>`);
 });
@@ -3324,7 +4213,7 @@ if(!t){window.location.href='/login'}
 else{try{const p=JSON.parse(atob(t.split('.')[1]));document.getElementById('nick').textContent=p.nickname;document.getElementById('email').textContent=p.email}catch{window.location.href='/login'}}
 function clearAndRedirect(){localStorage.removeItem('accessToken');localStorage.removeItem('refreshToken');window.location.href='/login'}
 document.getElementById('logout').onclick=async()=>{
-  if(rt){await fetch('/api/v1/logout',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({refreshToken:rt})})}
+  if(rt){await fetch('/api/v1/logout',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t,'Accept-Language':localStorage.getItem('selectedLanguage')||'en'},body:JSON.stringify({refreshToken:rt})})}
   clearAndRedirect();
 };
 document.getElementById('logoutAll').onclick=async()=>{
@@ -3340,7 +4229,7 @@ app.get('/login', (_req: Request, res: Response) => {
 <html><head><title>Login</title>${PAGE_HEAD}</head><body>
 <div class="c">
 <h1>Login</h1>
-<nav><a href="/signup" class="btn">Sign up</a></nav>
+<nav style="display:flex;align-items:center;gap:8px"><a href="/signup" class="btn">Sign up</a><select id="langSelect"></select></nav>
 <hr>
 <form id="f">
 Email<br><input type="email" name="email" required><br>
@@ -3349,6 +4238,7 @@ Password<br><input type="password" name="password" required><br>
 </form>
 <p id="err"></p>
 </div>
+${LANG_PICKER_SCRIPT}
 <script>
 document.getElementById('f').onsubmit=async e=>{
   e.preventDefault();
@@ -3369,7 +4259,7 @@ app.get('/signup', (_req: Request, res: Response) => {
 <html><head><title>Sign up</title>${PAGE_HEAD}</head><body>
 <div class="c">
 <h1>Sign up</h1>
-<nav><a href="/login" class="btn">Log in</a></nav>
+<nav style="display:flex;align-items:center;gap:8px"><a href="/login" class="btn">Log in</a><select id="langSelect"></select></nav>
 <hr>
 <form id="f">
 Nickname<br><input type="text" name="nickname" minlength="2" maxlength="32" required><br>
@@ -3380,6 +4270,7 @@ Role<br><select name="role"><option value="member">Member</option><option value=
 </form>
 <p id="err"></p>
 </div>
+${LANG_PICKER_SCRIPT}
 <script>
 document.getElementById('f').onsubmit=async e=>{
   e.preventDefault();

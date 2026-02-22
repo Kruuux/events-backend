@@ -3,8 +3,6 @@ CREATE TABLE events (
   human_id TEXT NOT NULL REFERENCES humans(id) ON DELETE CASCADE,
   organisation_id TEXT REFERENCES organisations(id) ON DELETE SET NULL,
   place_id TEXT NOT NULL REFERENCES places(id) ON DELETE RESTRICT,
-  title VARCHAR(256) NOT NULL,
-  description TEXT NOT NULL,
   start_date TIMESTAMPTZ NOT NULL,
   end_date TIMESTAMPTZ NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
