@@ -2536,16 +2536,22 @@ ${APP_NAV}
 <p>Nickname: <b id="nick"></b></p>
 <p>Email: <b id="email"></b> <small>(visible only to you)</small></p>
 <br>
-<button id="logout">Log out</button>
+<button id="logout">Log out</button> <button id="logoutAll">Log out from all devices</button>
+<p id="err"></p>
 </div>
 <script>
 const t=localStorage.getItem('accessToken');
+const rt=localStorage.getItem('refreshToken');
 if(!t){window.location.href='/login'}
 else{try{const p=JSON.parse(atob(t.split('.')[1]));document.getElementById('nick').textContent=p.nickname;document.getElementById('email').textContent=p.email}catch{window.location.href='/login'}}
-document.getElementById('logout').onclick=()=>{
-  localStorage.removeItem('accessToken');
-  localStorage.removeItem('refreshToken');
-  window.location.href='/login';
+function clearAndRedirect(){localStorage.removeItem('accessToken');localStorage.removeItem('refreshToken');window.location.href='/login'}
+document.getElementById('logout').onclick=async()=>{
+  if(rt){await fetch('/api/v1/logout',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({refreshToken:rt})})}
+  clearAndRedirect();
+};
+document.getElementById('logoutAll').onclick=async()=>{
+  await fetch('/api/v1/logout-all',{method:'POST',headers:{'Authorization':'Bearer '+t}});
+  clearAndRedirect();
 };
 </script>
 </body></html>`);
