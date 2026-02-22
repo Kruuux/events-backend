@@ -1038,6 +1038,12 @@ paths:
           description: Search by event title, place name, or organisation name (case-insensitive)
           schema:
             type: string
+        - name: cityId
+          in: query
+          description: Filter events by city (UUID of the city)
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
           description: Paginated list of events

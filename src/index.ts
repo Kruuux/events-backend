@@ -1432,6 +1432,7 @@ const EventListSchema = v.object({
   page: v.optional(v.pipe(v.string(), v.regex(/^\d+$/)), '1'),
   limit: v.optional(v.pipe(v.string(), v.regex(/^\d+$/)), '20'),
   search: v.optional(v.string()),
+  cityId: v.optional(UuidSchema),
 });
 
 app.get('/api/v1/events', async (req: Request, res: Response) => {
@@ -1448,21 +1449,50 @@ app.get('/api/v1/events', async (req: Request, res: Response) => {
   const limit = Math.min(100, Math.max(1, Number(query.limit)));
   const offset = (page - 1) * limit;
 
-  const searchFilter = query.search
-    ? `AND (e.title ILIKE '%' || $3 || '%' OR p.name ILIKE '%' || $3 || '%' OR o.name ILIKE '%' || $3 || '%')`
-    : '';
-  const countSearchFilter = query.search
-    ? `AND (e.title ILIKE '%' || $1 || '%' OR p.name ILIKE '%' || $1 || '%' OR o.name ILIKE '%' || $1 || '%')`
-    : '';
-  const params = query.search ? [limit, offset, query.search] : [limit, offset];
-  const countParams = query.search ? [query.search] : [];
+  const conditions: string[] = ['e.start_date >= CURRENT_DATE'];
+  const params: unknown[] = [limit, offset];
+  const countParams: unknown[] = [];
+  let paramIdx = 3;
+  let countIdx = 1;
+
+  if (query.search) {
+    conditions.push(
+      `(e.title ILIKE '%' || $${paramIdx} || '%' OR p.name ILIKE '%' || $${paramIdx} || '%' OR o.name ILIKE '%' || $${paramIdx} || '%')`,
+    );
+    params.push(query.search);
+    countParams.push(query.search);
+    paramIdx++;
+    countIdx++;
+  }
+  if (query.cityId) {
+    conditions.push(`p.city_id = $${paramIdx}`);
+    params.push(query.cityId);
+    countParams.push(query.cityId);
+    paramIdx++;
+    countIdx++;
+  }
+
+  const where = conditions.join(' AND ');
+  const countConditions: string[] = ['e.start_date >= CURRENT_DATE'];
+  let ci = 1;
+  if (query.search) {
+    countConditions.push(
+      `(e.title ILIKE '%' || $${ci} || '%' OR p.name ILIKE '%' || $${ci} || '%' OR o.name ILIKE '%' || $${ci} || '%')`,
+    );
+    ci++;
+  }
+  if (query.cityId) {
+    countConditions.push(`p.city_id = $${ci}`);
+    ci++;
+  }
+  const countWhere = countConditions.join(' AND ');
 
   const [countResult, rows] = await Promise.all([
     pool.query(
       `SELECT COUNT(*) FROM events e
        JOIN places p ON p.id = e.place_id
        LEFT JOIN organisations o ON o.id = e.organisation_id
-       WHERE e.start_date >= CURRENT_DATE ${countSearchFilter}`,
+       WHERE ${countWhere}`,
       countParams,
     ),
     pool.query(
@@ -1474,7 +1504,7 @@ app.get('/api/v1/events', async (req: Request, res: Response) => {
        FROM events e
        JOIN places p ON p.id = e.place_id
        LEFT JOIN organisations o ON o.id = e.organisation_id
-       WHERE e.start_date >= CURRENT_DATE ${searchFilter}
+       WHERE ${where}
        ORDER BY e.start_date ASC LIMIT $1 OFFSET $2`,
       params,
     ),
@@ -1670,7 +1700,7 @@ app.delete('/api/v1/events/:id', async (req: Request, res: Response) => {
 
 // --- pages ---
 
-const PAGE_STYLE = `*{margin:0;padding:0;box-sizing:border-box}body{background:#fff;color:#000;font-family:monospace;font-size:16px}.c{max-width:1000px;margin:0 auto;padding:24px 16px}a{color:#000}nav{margin:8px 0 16px}hr{border:none;border-top:1px solid #000;margin:16px 0}input,select{border:1px solid #000;padding:6px;margin:4px 0 12px;width:100%;font-family:monospace;font-size:16px}button{border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer}#err{font-weight:bold;margin-top:12px}.dropdown{border:1px solid #000;max-height:150px;overflow-y:auto;display:none}.dropdown div{padding:4px 6px;cursor:pointer}.dropdown div:hover{background:#000;color:#fff}.bc{margin:8px 0;font-size:14px}.searchRow{display:flex;align-items:center;gap:12px;margin-bottom:12px}.searchRow input{flex:1;margin-bottom:0}`;
+const PAGE_STYLE = `*{margin:0;padding:0;box-sizing:border-box}body{background:#fff;color:#000;font-family:monospace;font-size:16px}.c{max-width:1000px;margin:0 auto;padding:24px 16px}a{color:#000}nav{margin:8px 0 16px}hr{border:none;border-top:1px solid #000;margin:16px 0}input,select{border:1px solid #000;padding:6px;margin:4px 0 12px;width:100%;font-family:monospace;font-size:16px}button{border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer}#err{font-weight:bold;margin-top:12px}.dropdown{border:1px solid #000;max-height:150px;overflow-y:auto;display:none}.dropdown div{padding:4px 6px;cursor:pointer}.dropdown div:hover{background:#000;color:#fff}.bc{margin:8px 0;font-size:14px}.searchRow{display:flex;align-items:center;gap:12px;margin-bottom:12px}.searchRow input{flex:1;margin-bottom:0}#cityPicker{position:relative}#cityPicker input{width:180px;margin:0}#cityPicker .dropdown{position:absolute;right:0;width:180px;background:#fff;z-index:10}`;
 const PAGE_HEAD = `<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${PAGE_STYLE}</style>`;
 const NAV_SCRIPT = `<script>
 (function(){const t=localStorage.getItem('accessToken');if(!t)return;
@@ -1684,8 +1714,78 @@ else if(ph==='/cities-list')ah='/cities-list';
 else if(ph==='/profile')ah='/profile';
 document.querySelectorAll('nav a').forEach(function(a){if(a.getAttribute('href')===ah)a.style.fontWeight='bold'});
 })();
+(function(){
+var t=localStorage.getItem('accessToken');if(!t)return;
+var cityBtn=document.getElementById('cityBtn');
+var cityInputWrap=document.getElementById('cityInputWrap');
+var cityInput=document.getElementById('cityInput');
+var cityDrop=document.getElementById('cityDrop');
+if(!cityBtn||!cityInput)return;
+function updateBtn(){
+  var id=localStorage.getItem('selectedCityId');
+  var name=localStorage.getItem('selectedCityName');
+  if(id&&name){cityBtn.textContent=name+' [x]'}else{cityBtn.textContent='All cities'}
+}
+updateBtn();
+function showDrop(cities){
+  cityDrop.innerHTML='';
+  for(var i=0;i<cities.length;i++){
+    var d=document.createElement('div');
+    d.textContent=cities[i].name;
+    d.dataset.id=cities[i].id;
+    d.dataset.name=cities[i].name;
+    d.onmousedown=function(e){e.preventDefault()};
+    d.onclick=function(){
+      localStorage.setItem('selectedCityId',this.dataset.id);
+      localStorage.setItem('selectedCityName',this.dataset.name);
+      updateBtn();
+      cityInputWrap.style.display='none';cityBtn.style.display='';
+      cityInput.value='';cityDrop.style.display='none';
+      if(window.onCityChange)window.onCityChange();
+    };
+    cityDrop.appendChild(d);
+  }
+  cityDrop.style.display=cities.length?'block':'none';
+}
+function fetchCities(name){
+  var url='/api/v1/cities?limit=20';
+  if(name)url+='&name='+encodeURIComponent(name);
+  fetch(url,{headers:{'Authorization':'Bearer '+t}}).then(function(r){return r.json()}).then(function(j){showDrop(j.data||[])});
+}
+cityBtn.onclick=function(e){
+  e.preventDefault();
+  var id=localStorage.getItem('selectedCityId');
+  if(id&&this.textContent.indexOf('[x]')!==-1){
+    var rect=this.getBoundingClientRect();
+    var btnW=rect.width;
+    var xStart=rect.right-20;
+    if(e.clientX>=xStart){
+      localStorage.removeItem('selectedCityId');
+      localStorage.removeItem('selectedCityName');
+      updateBtn();
+      if(window.onCityChange)window.onCityChange();
+      return;
+    }
+  }
+  this.style.display='none';
+  cityInputWrap.style.display='';
+  cityInput.focus();
+  fetchCities();
+};
+var cityDebounce;
+cityInput.oninput=function(){
+  clearTimeout(cityDebounce);
+  var v=this.value.trim();
+  cityDebounce=setTimeout(function(){
+    if(v.length>=2){fetchCities(v)}else{fetchCities()}
+  },300);
+};
+cityInput.onblur=function(){
+  setTimeout(function(){cityDrop.style.display='none';cityInputWrap.style.display='none';cityBtn.style.display=''},150);
+};
+})();
 </script>`;
-const APP_NAV = `<nav>[<a href="/">Events</a>] [<a href="/organisations-list">Organisations</a>] [<a href="/places-list">Places</a>] <span id="adminNav" style="display:none">[<a href="/countries-list">Countries</a>] [<a href="/cities-list">Cities</a>] </span>[<a href="/profile">Profile</a>]</nav>${NAV_SCRIPT}`;
+const APP_NAV = `<nav style="display:flex;align-items:center;justify-content:space-between"><span>[<a href="/">Events</a>] [<a href="/organisations-list">Organisations</a>] [<a href="/places-list">Places</a>] <span id="adminNav" style="display:none">[<a href="/countries-list">Countries</a>] [<a href="/cities-list">Cities</a>] </span>[<a href="/profile">Profile</a>]</span><span id="cityPicker"><button id="cityBtn">All cities</button><span id="cityInputWrap" style="display:none"><input type="text" id="cityInput" placeholder="Search city..." autocomplete="off"><div class="dropdown" id="cityDrop"></div></span></span></nav>${NAV_SCRIPT}`;
 
 const ORG_SEARCH_HTML = `Organisation (optional)<br><input type="text" id="orgSearch" placeholder="Search by name..." autocomplete="off"><input type="hidden" name="organisationId" id="orgId"><div class="dropdown" id="orgDrop"></div>`;
 const ORG_SEARCH_SCRIPT = `
@@ -1842,6 +1942,7 @@ async function load(){
   document.getElementById('loading').style.display='block';
   let url='/api/v1/events?page='+page+'&limit='+limit;
   if(searchTerm)url+='&search='+encodeURIComponent(searchTerm);
+  var sc=localStorage.getItem('selectedCityId');if(sc)url+='&cityId='+sc;
   const r=await fetch(url,{headers:{'Authorization':'Bearer '+t}});
   if(!r.ok){loading=false;document.getElementById('loading').style.display='none';return}
   const j=await r.json();
@@ -1882,6 +1983,7 @@ async function load(){
 window.addEventListener('scroll',()=>{
   if(window.innerHeight+window.scrollY>=document.body.offsetHeight-200)load();
 });
+window.onCityChange=function(){page=1;done=false;lastDateLabel='';document.getElementById('list').innerHTML='';document.getElementById('end').style.display='none';load()};
 load();
 
 // --- map view ---
@@ -2764,6 +2866,7 @@ async function load(){
   let url='/api/v1/places?page='+page+'&limit='+limit;
   if(searchTerm)url+='&search='+encodeURIComponent(searchTerm);
   if(onlyFavourites)url+='&onlyFavourites=true';
+  var sc=localStorage.getItem('selectedCityId');if(sc)url+='&cityId='+sc;
   const r=await fetch(url,{headers:{'Authorization':'Bearer '+t}});
   if(!r.ok){loading=false;document.getElementById('loading').style.display='none';return}
   const j=await r.json();
@@ -2825,6 +2928,7 @@ async function load(){
 window.addEventListener('scroll',()=>{
   if(window.innerHeight+window.scrollY>=document.body.offsetHeight-200)load();
 });
+window.onCityChange=function(){page=1;done=false;document.getElementById('list').innerHTML='';document.getElementById('end').style.display='none';load()};
 load();
 </script>
 </body></html>`);
