@@ -1700,7 +1700,7 @@ app.delete('/api/v1/events/:id', async (req: Request, res: Response) => {
 
 // --- pages ---
 
-const PAGE_STYLE = `*{margin:0;padding:0;box-sizing:border-box}body{background:#fff;color:#000;font-family:monospace;font-size:16px}.c{max-width:1000px;margin:0 auto;padding:24px 16px}a{color:#000}nav{margin:8px 0 16px}hr{border:none;border-top:1px solid #000;margin:16px 0}input,select{border:1px solid #000;padding:6px;margin:4px 0 12px;width:100%;font-family:monospace;font-size:16px}button{border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer}#err{font-weight:bold;margin-top:12px}.dropdown{border:1px solid #000;max-height:150px;overflow-y:auto;display:none}.dropdown div{padding:4px 6px;cursor:pointer}.dropdown div:hover{background:#000;color:#fff}.bc{margin:8px 0;font-size:14px}.searchRow{display:flex;align-items:center;gap:12px;margin-bottom:12px}.searchRow input{flex:1;margin-bottom:0}#cityPicker{position:relative}#cityPicker input{width:180px;margin:0}#cityPicker .dropdown{position:absolute;right:0;width:180px;background:#fff;z-index:10}`;
+const PAGE_STYLE = `*{margin:0;padding:0;box-sizing:border-box}body{background:#fff;color:#000;font-family:monospace;font-size:16px}.c{max-width:1000px;margin:0 auto;padding:24px 16px}a{color:#000}nav{margin:8px 0 16px}hr{border:none;border-top:1px solid #000;margin:16px 0}input,select{border:1px solid #000;padding:6px;margin:4px 0 12px;width:100%;font-family:monospace;font-size:16px}button{border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer}#err{font-weight:bold;margin-top:12px}.dropdown{border:1px solid #000;max-height:150px;overflow-y:auto;display:none}.dropdown div{padding:4px 6px;cursor:pointer}.dropdown div:hover{background:#000;color:#fff}.bc{margin:8px 0;font-size:14px}.searchRow{display:flex;align-items:center;gap:12px;margin-bottom:12px}.searchRow input{flex:1;margin-bottom:0}#cityPicker{position:relative}#cityPicker input{width:180px;margin:0}#cityPicker .dropdown{position:absolute;right:0;width:180px;background:#fff;z-index:10}.btn{display:inline-block;border:1px solid #000;background:#fff;color:#000;padding:4px 12px;font-family:monospace;font-size:14px;cursor:pointer;text-decoration:none}.btn:hover{background:#000;color:#fff}`;
 const PAGE_HEAD = `<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${PAGE_STYLE}</style>`;
 const NAV_SCRIPT = `<script>
 (function(){const t=localStorage.getItem('accessToken');if(!t)return;
@@ -1797,7 +1797,7 @@ cityInput.onblur=function(){
 };
 })();
 </script>`;
-const APP_NAV = `<nav style="display:flex;align-items:center;justify-content:space-between"><span>[<a href="/">Events</a>] [<a href="/organisations-list">Organisations</a>] [<a href="/places-list">Places</a>] <span id="adminNav" style="display:none">[<a href="/countries-list">Countries</a>] [<a href="/cities-list">Cities</a>] </span>[<a href="/profile">Profile</a>]</span><span id="cityPicker"><button id="cityBtn">All cities</button><span id="cityInputWrap" style="display:none"><input type="text" id="cityInput" placeholder="Search city..." autocomplete="off"><div class="dropdown" id="cityDrop"></div></span></span></nav>${NAV_SCRIPT}`;
+const APP_NAV = `<nav style="display:flex;align-items:center;justify-content:space-between"><span><a href="/" class="btn">Events</a> <a href="/organisations-list" class="btn">Organisations</a> <a href="/places-list" class="btn">Places</a> <span id="adminNav" style="display:none"><a href="/countries-list" class="btn">Countries</a> <a href="/cities-list" class="btn">Cities</a> </span><a href="/profile" class="btn">Profile</a></span><span id="cityPicker"><button id="cityBtn">All cities</button><span id="cityInputWrap" style="display:none"><input type="text" id="cityInput" placeholder="Search city..." autocomplete="off"><div class="dropdown" id="cityDrop"></div></span></span></nav>${NAV_SCRIPT}`;
 
 const ORG_SEARCH_HTML = `Organisation (optional)<br><input type="text" id="orgSearch" placeholder="Search by name..." autocomplete="off"><input type="hidden" name="organisationId" id="orgId"><div class="dropdown" id="orgDrop"></div>`;
 const ORG_SEARCH_SCRIPT = `
@@ -1964,7 +1964,7 @@ async function load(){
       +esc(ev.description)+'<br>';
     if(ev.placeName)evHtml+='<small>Place: <a href="/view/place/'+ev.placeId+'">'+esc(ev.placeName)+'</a></small><br>';
     if(ev.organisationName)evHtml+='<small>Organisation: <a href="/view/organisation/'+ev.organisationId+'">'+esc(ev.organisationName)+'</a></small><br>';
-    if(me.role==='admin')evHtml+='<a href="/edit/event/'+ev.id+'">[edit]</a> <a href="#" class="delEv" data-id="'+ev.id+'">[delete]</a><br>';
+    if(me.role==='admin')evHtml+='<a href="/edit/event/'+ev.id+'" class="btn">edit</a> <a href="#" class="btn delEv" data-id="'+ev.id+'">delete</a><br>';
     evHtml+='<hr>';
     dv.innerHTML=evHtml;
     list.appendChild(dv);
@@ -2009,7 +2009,7 @@ ${APP_NAV}
 </div>
 <p class="bc">Organisations /</p>
 <div class="searchRow"><input type="text" id="searchInput" placeholder="Search organisations...">
-<a href="#" id="favLink">[Show favourites]</a></div>
+<a href="#" id="favLink" class="btn">Show favourites</a></div>
 <div id="list"></div>
 <p id="loading">Loading...</p>
 <p id="end">---</p>
@@ -2053,7 +2053,7 @@ document.getElementById('searchInput').oninput=function(){
 document.getElementById('favLink').onclick=function(e){
   e.preventDefault();
   onlyFavourites=!onlyFavourites;
-  this.textContent=onlyFavourites?'[Show all]':'[Show favourites]';
+  this.textContent=onlyFavourites?'Show all':'Show favourites';
   page=1;done=false;
   document.getElementById('list').innerHTML='';
   document.getElementById('end').style.display='none';
@@ -2073,8 +2073,8 @@ async function load(){
   for(const o of j.data){
     const dv=document.createElement('div');
     let oHtml='<a href="/view/organisation/'+o.id+'"><b>'+esc(o.name)+'</b></a>';
-    if(me.role==='admin')oHtml+=' <a href="/edit/organisation/'+o.id+'">[edit]</a> <a href="#" class="delOrg" data-id="'+o.id+'">[delete]</a>';
-    oHtml+=' <a href="#" class="favOrg" style="float:right" data-id="'+o.id+'" data-fav="'+o.isFavourite+'">'+(o.isFavourite?'[Remove from favourites]':'[Add to favourites]')+'</a>';
+    if(me.role==='admin')oHtml+=' <a href="/edit/organisation/'+o.id+'" class="btn">edit</a> <a href="#" class="btn delOrg" data-id="'+o.id+'">delete</a>';
+    oHtml+=' <a href="#" class="btn favOrg" style="float:right" data-id="'+o.id+'" data-fav="'+o.isFavourite+'">'+(o.isFavourite?'Remove from favourites':'Add to favourites')+'</a>';
     oHtml+='<hr>';
     dv.innerHTML=oHtml;
     list.appendChild(dv);
@@ -2095,10 +2095,10 @@ async function load(){
       const isFav=a.dataset.fav==='true';
       if(isFav){
         await fetch('/api/v1/favourite-organisations/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
-        a.dataset.fav='false';a.textContent='[Add to favourites]';
+        a.dataset.fav='false';a.textContent='Add to favourites';
       }else{
         await fetch('/api/v1/favourite-organisations',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({organisationId:a.dataset.id})});
-        a.dataset.fav='true';a.textContent='[Remove from favourites]';
+        a.dataset.fav='true';a.textContent='Remove from favourites';
       }
     };
   });
@@ -2144,8 +2144,8 @@ try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
   if(ev.organisationId)html+='<p>Organisation: <a href="/view/organisation/'+ev.organisationId+'">'+esc(ev.organisationName||ev.organisationId)+'</a></p>';
   const canEdit=me.role==='admin';
   if(canEdit){
-    html+='<br><a href="/edit/event/'+ev.id+'">[edit]</a>';
-    html+=' <a href="#" id="deleteBtn">[delete]</a>';
+    html+='<br><a href="/edit/event/'+ev.id+'" class="btn">edit</a>';
+    html+=' <a href="#" id="deleteBtn" class="btn">delete</a>';
   }
   document.getElementById('detail').innerHTML=html;
   if(canEdit){
@@ -2194,8 +2194,8 @@ try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
   document.getElementById('eventsTitle').textContent='Events of '+o.name;
   let html='';
   if(me.role==='admin'){
-    html+='<a href="/edit/organisation/'+o.id+'">[edit]</a>';
-    html+=' <a href="#" id="deleteBtn">[delete]</a>';
+    html+='<a href="/edit/organisation/'+o.id+'" class="btn">edit</a>';
+    html+=' <a href="#" id="deleteBtn" class="btn">delete</a>';
   }
   document.getElementById('detail').innerHTML=html;
   if(me.role==='admin'){
@@ -2506,7 +2506,7 @@ async function loadList(){
   list.innerHTML='';
   for(const c of j.data){
     const d=document.createElement('div');
-    d.innerHTML=esc(c.name)+' <a href="#" class="edit" data-id="'+c.id+'" data-name="'+esc(c.name)+'">[edit]</a> <a href="#" class="del" data-id="'+c.id+'">[delete]</a><hr>';
+    d.innerHTML=esc(c.name)+' <a href="#" class="btn edit" data-id="'+c.id+'" data-name="'+esc(c.name)+'">edit</a> <a href="#" class="btn del" data-id="'+c.id+'">delete</a><hr>';
     list.appendChild(d);
   }
   list.querySelectorAll('.edit').forEach(a=>{
@@ -2631,7 +2631,7 @@ async function loadList(){
   list.innerHTML='';
   for(const c of j.data){
     const d=document.createElement('div');
-    d.innerHTML=esc(c.name)+' <small>('+esc(c.countryName)+')</small> <a href="#" class="edit" data-id="'+c.id+'" data-name="'+esc(c.name)+'" data-country="'+c.countryId+'">[edit]</a> <a href="#" class="del" data-id="'+c.id+'">[delete]</a><hr>';
+    d.innerHTML=esc(c.name)+' <small>('+esc(c.countryName)+')</small> <a href="#" class="btn edit" data-id="'+c.id+'" data-name="'+esc(c.name)+'" data-country="'+c.countryId+'">edit</a> <a href="#" class="btn del" data-id="'+c.id+'">delete</a><hr>';
     list.appendChild(d);
   }
   list.querySelectorAll('.edit').forEach(a=>{
@@ -2689,7 +2689,7 @@ City<br><select id="editCitySelect"><option value="">-- select --</option></sele
 <hr>
 <p class="bc">Places /</p>
 <div class="searchRow"><input type="text" id="searchInput" placeholder="Search places...">
-<a href="#" id="favLink">[Show favourites]</a></div>
+<a href="#" id="favLink" class="btn">Show favourites</a></div>
 <div id="list"></div>
 <p id="loading">Loading...</p>
 <p id="end">---</p>
@@ -2787,7 +2787,7 @@ document.getElementById('searchInput').oninput=function(){
 document.getElementById('favLink').onclick=function(e){
   e.preventDefault();
   onlyFavourites=!onlyFavourites;
-  this.textContent=onlyFavourites?'[Show all]':'[Show favourites]';
+  this.textContent=onlyFavourites?'Show all':'Show favourites';
   page=1;done=false;
   document.getElementById('list').innerHTML='';
   document.getElementById('end').style.display='none';
@@ -2810,10 +2810,10 @@ async function load(){
     let pHtml='<a href="/view/place/'+p.id+'"><b>'+esc(p.name)+'</b></a><br>'+esc(p.address)+' <small>('+esc(p.cityName)+', '+esc(p.countryName)+')</small><br>'
       +'<small>Lat: '+p.latitude+', Lng: '+p.longitude+'</small>';
     if(me.role==='admin'){
-      pHtml+=' <a href="#" class="edit" data-id="'+p.id+'" data-name="'+esc(p.name)+'" data-address="'+esc(p.address)+'" data-lat="'+p.latitude+'" data-lng="'+p.longitude+'" data-city="'+p.cityId+'">[edit]</a>'
-        +' <a href="#" class="del" data-id="'+p.id+'">[delete]</a>';
+      pHtml+=' <a href="#" class="btn edit" data-id="'+p.id+'" data-name="'+esc(p.name)+'" data-address="'+esc(p.address)+'" data-lat="'+p.latitude+'" data-lng="'+p.longitude+'" data-city="'+p.cityId+'">edit</a>'
+        +' <a href="#" class="btn del" data-id="'+p.id+'">delete</a>';
     }
-    pHtml+=' <a href="#" class="favPlace" style="float:right" data-id="'+p.id+'" data-fav="'+p.isFavourite+'">'+(p.isFavourite?'[Remove from favourites]':'[Add to favourites]')+'</a>';
+    pHtml+=' <a href="#" class="btn favPlace" style="float:right" data-id="'+p.id+'" data-fav="'+p.isFavourite+'">'+(p.isFavourite?'Remove from favourites':'Add to favourites')+'</a>';
     pHtml+='<hr>';
     d.innerHTML=pHtml;
     list.appendChild(d);
@@ -2847,10 +2847,10 @@ async function load(){
       const isFav=a.dataset.fav==='true';
       if(isFav){
         await fetch('/api/v1/favourite-places/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
-        a.dataset.fav='false';a.textContent='[Add to favourites]';
+        a.dataset.fav='false';a.textContent='Add to favourites';
       }else{
         await fetch('/api/v1/favourite-places',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({placeId:a.dataset.id})});
-        a.dataset.fav='true';a.textContent='[Remove from favourites]';
+        a.dataset.fav='true';a.textContent='Remove from favourites';
       }
     };
   });
@@ -2905,7 +2905,7 @@ app.get('/login', (_req: Request, res: Response) => {
 <html><head><title>Login</title>${PAGE_HEAD}</head><body>
 <div class="c">
 <h1>Login</h1>
-<nav>[<a href="/signup">Sign up</a>]</nav>
+<nav><a href="/signup" class="btn">Sign up</a></nav>
 <hr>
 <form id="f">
 Email<br><input type="email" name="email" required><br>
@@ -2934,7 +2934,7 @@ app.get('/signup', (_req: Request, res: Response) => {
 <html><head><title>Sign up</title>${PAGE_HEAD}</head><body>
 <div class="c">
 <h1>Sign up</h1>
-<nav>[<a href="/login">Log in</a>]</nav>
+<nav><a href="/login" class="btn">Log in</a></nav>
 <hr>
 <form id="f">
 Nickname<br><input type="text" name="nickname" minlength="2" maxlength="32" required><br>
