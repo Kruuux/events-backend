@@ -1851,9 +1851,7 @@ document.addEventListener('click',e=>{if(!e.target.closest('#placeSearch,#placeD
 
 app.get('/', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>
-<html><head><title>Events</title>${PAGE_HEAD}<style>#end{display:none}.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:#fff;color:#000;border-radius:0;box-shadow:none;border:1px solid #000}.leaflet-popup-content{font-family:monospace;font-size:14px}.leaflet-container a{color:#000}.leaflet-control-zoom a{background:#fff;color:#000;border:1px solid #000;border-radius:0}.leaflet-control-attribution{font-family:monospace;font-size:11px}</style>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
+<html><head><title>Events</title>${PAGE_HEAD}<style>#end{display:none}</style>
 </head><body>
 <div class="c">
 <h1>Events</h1>
@@ -1873,16 +1871,9 @@ ${ORG_SEARCH_HTML}<br>
 </div>
 <p class="bc">Events /</p>
 <input type="text" id="searchInput" placeholder="Search events..." style="margin-bottom:12px">
-<p id="toggle"><b>list</b> | <a href="#" id="toMap">map</a></p>
-<div id="listView">
 <div id="list"></div>
 <p id="loading">Loading...</p>
 <p id="end">---</p>
-</div>
-<div id="mapView" style="display:none">
-<p id="mapMsg" style="margin:8px 0"></p>
-<div id="map" style="width:100%;height:600px;border:1px solid #000"></div>
-</div>
 </div>
 <script>
 if(!localStorage.getItem('accessToken'))window.location.href='/login';
@@ -1998,75 +1989,6 @@ window.addEventListener('scroll',()=>{
 window.onCityChange=function(){page=1;done=false;lastDateLabel='';document.getElementById('list').innerHTML='';document.getElementById('end').style.display='none';load()};
 load();
 
-// --- map view ---
-let map=null;
-let markers=[];
-
-function initMap(){
-  if(map)return;
-  map=L.map('map',{attributionControl:false}).setView([51.110655,17.032817],15);
-  L.control.attribution({prefix:false}).addTo(map);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-    attribution:'&copy; OpenStreetMap'
-  }).addTo(map);
-  map.on('moveend',loadArea);
-  loadArea();
-}
-
-async function loadArea(){
-  const b=map.getBounds();
-  const minLat=b.getSouth(),maxLat=b.getNorth(),minLng=b.getWest(),maxLng=b.getEast();
-  const latKm=(maxLat-minLat)*111;
-  const lngKm=(maxLng-minLng)*111*Math.cos(((minLat+maxLat)/2)*Math.PI/180);
-  const msg=document.getElementById('mapMsg');
-
-  markers.forEach(m=>map.removeLayer(m));
-  markers=[];
-
-  if(latKm>10||lngKm>10){
-    msg.textContent='Zoom in to see events (max 10\\u00d710 km area)';
-    return;
-  }
-  msg.textContent='';
-
-  const r=await fetch('/api/v1/events/area?minLat='+minLat+'&maxLat='+maxLat+'&minLng='+minLng+'&maxLng='+maxLng,{headers:{'Authorization':'Bearer '+t}});
-  if(!r.ok)return;
-  const j=await r.json();
-  for(const ev of j.data){
-    let popup='<div style="font-family:monospace;font-size:14px">'
-      +'<b><a href="/view/event/'+ev.id+'">'+esc(ev.title)+'</a></b><br>'
-      +esc(ev.description)+'<br>';
-    if(ev.organisationName)popup+='<small>Organisation: <a href="/view/organisation/'+ev.organisationId+'">'+esc(ev.organisationName)+'</a></small><br>';
-    popup+='<small>'+new Date(ev.startDate).toLocaleString()+' - '+new Date(ev.endDate).toLocaleString()+'</small></div>';
-    const m=L.marker([ev.latitude,ev.longitude]).addTo(map).bindPopup(popup);
-    markers.push(m);
-  }
-}
-
-// --- toggle ---
-document.getElementById('toMap').onclick=function(e){
-  e.preventDefault();
-  document.getElementById('listView').style.display='none';
-  document.getElementById('mapView').style.display='block';
-  document.getElementById('toggle').innerHTML='<a href="#" id="toList">list</a> | <b>map</b>';
-  document.getElementById('toList').onclick=switchToList;
-  initMap();
-  setTimeout(()=>map.invalidateSize(),0);
-};
-function switchToList(e){
-  e.preventDefault();
-  document.getElementById('listView').style.display='block';
-  document.getElementById('mapView').style.display='none';
-  document.getElementById('toggle').innerHTML='<b>list</b> | <a href="#" id="toMap2">map</a>';
-  document.getElementById('toMap2').onclick=function(e2){
-    e2.preventDefault();
-    document.getElementById('listView').style.display='none';
-    document.getElementById('mapView').style.display='block';
-    document.getElementById('toggle').innerHTML='<a href="#" id="toList">list</a> | <b>map</b>';
-    document.getElementById('toList').onclick=switchToList;
-    setTimeout(()=>map.invalidateSize(),0);
-  };
-}
 </script>
 </body></html>`);
 });
