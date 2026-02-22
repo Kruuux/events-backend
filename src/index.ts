@@ -527,6 +527,181 @@ app.delete('/api/v1/organisations/:id', async (req: Request, res: Response) => {
   res.status(200).end();
 });
 
+// --- tags ---
+
+const CreateTagSchema = v.object({
+  name: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
+});
+
+app.post('/api/v1/tags', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+  if (payload.role !== 'admin') {
+    res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
+    return;
+  }
+
+  const data = validate(CreateTagSchema, req.body, res);
+  if (!data) return;
+
+  const nameCheck = await pool.query(
+    'SELECT id FROM tags WHERE name = $1',
+    [data.name],
+  );
+  if (nameCheck.rows.length > 0) {
+    res.status(409).json({ code: 'TAG_NAME_ALREADY_TAKEN_EXCEPTION' });
+    return;
+  }
+
+  const tagId = crypto.randomUUID();
+  const row = await pool.query(
+    `INSERT INTO tags (id, human_id, name)
+     VALUES ($1, $2, $3)
+     RETURNING id, human_id AS "humanId", name, created_at AS "createdAt"`,
+    [tagId, payload.sub, data.name],
+  );
+
+  res.status(201).json(row.rows[0]);
+});
+
+const TagListSchema = v.object({
+  page: v.optional(v.pipe(v.string(), v.regex(/^\d+$/)), '1'),
+  limit: v.optional(v.pipe(v.string(), v.regex(/^\d+$/)), '20'),
+  name: v.optional(v.string()),
+});
+
+app.get('/api/v1/tags', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+
+  const query = validate(TagListSchema, req.query, res);
+  if (!query) return;
+
+  const page = Math.max(1, Number(query.page));
+  const limit = Math.min(100, Math.max(1, Number(query.limit)));
+  const offset = (page - 1) * limit;
+
+  const where = query.name ? `WHERE name ILIKE '%' || $3 || '%'` : '';
+  const params = query.name ? [limit, offset, query.name] : [limit, offset];
+  const countParams = query.name ? [query.name] : [];
+  const countWhere = query.name ? `WHERE name ILIKE '%' || $1 || '%'` : '';
+
+  const [countResult, rows] = await Promise.all([
+    pool.query(`SELECT COUNT(*) FROM tags ${countWhere}`, countParams),
+    pool.query(
+      `SELECT id, human_id AS "humanId", name, created_at AS "createdAt"
+       FROM tags ${where} ORDER BY name ASC LIMIT $1 OFFSET $2`,
+      params,
+    ),
+  ]);
+
+  const total = Number(countResult.rows[0]!.count);
+  res.status(200).json({ data: rows.rows, count: total });
+});
+
+app.get('/api/v1/tags/:id', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+
+  const params = validate(IdParamSchema, req.params, res);
+  if (!params) return;
+
+  const row = await pool.query(
+    `SELECT id, human_id AS "humanId", name, created_at AS "createdAt"
+     FROM tags WHERE id = $1`,
+    [params.id],
+  );
+
+  if (row.rows.length === 0) {
+    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+    return;
+  }
+
+  res.status(200).json(row.rows[0]);
+});
+
+const UpdateTagSchema = v.object({
+  id: UuidSchema,
+  name: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
+});
+
+app.put('/api/v1/tags/:id', async (req: Request, res: Response) => {
+  const data = validate(
+    UpdateTagSchema,
+    { ...req.params, ...req.body },
+    res,
+  );
+  if (!data) return;
+
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+  if (payload.role !== 'admin') {
+    res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
+    return;
+  }
+
+  const nameCheck = await pool.query(
+    'SELECT id FROM tags WHERE name = $1 AND id != $2',
+    [data.name, data.id],
+  );
+  if (nameCheck.rows.length > 0) {
+    res.status(409).json({ code: 'TAG_NAME_ALREADY_TAKEN_EXCEPTION' });
+    return;
+  }
+
+  const row = await pool.query(
+    `UPDATE tags SET name = $1 WHERE id = $2
+     RETURNING id, human_id AS "humanId", name, created_at AS "createdAt"`,
+    [data.name, data.id],
+  );
+
+  if (row.rows.length === 0) {
+    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+    return;
+  }
+
+  res.status(200).json(row.rows[0]);
+});
+
+app.delete('/api/v1/tags/:id', async (req: Request, res: Response) => {
+  const params = validate(IdParamSchema, req.params, res);
+  if (!params) return;
+
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+  if (payload.role !== 'admin') {
+    res.status(403).json({ code: 'FORBIDDEN_EXCEPTION' });
+    return;
+  }
+
+  const row = await pool.query(
+    'DELETE FROM tags WHERE id = $1 RETURNING id',
+    [params.id],
+  );
+
+  if (row.rows.length === 0) {
+    res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+    return;
+  }
+
+  res.status(200).end();
+});
+
 app.get(
   '/api/v1/organisations/:organisationId/events',
   async (req: Request, res: Response) => {
@@ -553,7 +728,8 @@ app.get(
                 e.place_id AS "placeId", e.title, e.description,
                 p.latitude, p.longitude, p.name AS "placeName", p.address AS "placeAddress",
                 e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
-                o.name AS "organisationName"
+                o.name AS "organisationName",
+                COALESCE((SELECT json_agg(json_build_object('id', tg.id, 'name', tg.name)) FROM event_tags et JOIN tags tg ON tg.id = et.tag_id WHERE et.event_id = e.id), '[]'::json) AS "tags"
          FROM events e
          JOIN places p ON p.id = e.place_id
          LEFT JOIN organisations o ON o.id = e.organisation_id
@@ -593,7 +769,8 @@ app.get('/api/v1/places/:placeId/events', async (req: Request, res: Response) =>
                 e.place_id AS "placeId", e.title, e.description,
                 p.latitude, p.longitude, p.name AS "placeName", p.address AS "placeAddress",
                 e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
-                o.name AS "organisationName"
+                o.name AS "organisationName",
+                COALESCE((SELECT json_agg(json_build_object('id', tg.id, 'name', tg.name)) FROM event_tags et JOIN tags tg ON tg.id = et.tag_id WHERE et.event_id = e.id), '[]'::json) AS "tags"
          FROM events e
          JOIN places p ON p.id = e.place_id
          LEFT JOIN organisations o ON o.id = e.organisation_id
@@ -1371,6 +1548,7 @@ const CreateEventSchema = v.object({
   startDate: v.pipe(v.string(), v.isoTimestamp()),
   endDate: v.pipe(v.string(), v.isoTimestamp()),
   organisationId: v.optional(UuidSchema),
+  tagIds: v.optional(v.array(UuidSchema)),
 });
 
 app.post('/api/v1/events', async (req: Request, res: Response) => {
@@ -1425,7 +1603,27 @@ app.post('/api/v1/events', async (req: Request, res: Response) => {
     ],
   );
 
-  res.status(201).json(row.rows[0]);
+  const event = row.rows[0]!;
+  let tags: { id: string; name: string }[] = [];
+
+  if (data.tagIds && data.tagIds.length > 0) {
+    const tagCheck = await pool.query(
+      'SELECT id, name FROM tags WHERE id = ANY($1)',
+      [data.tagIds],
+    );
+    if (tagCheck.rows.length !== data.tagIds.length) {
+      res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+      return;
+    }
+    const values = data.tagIds.map((_, i) => `($1, $${i + 2})`).join(', ');
+    await pool.query(
+      `INSERT INTO event_tags (event_id, tag_id) VALUES ${values}`,
+      [eventId, ...data.tagIds],
+    );
+    tags = tagCheck.rows as { id: string; name: string }[];
+  }
+
+  res.status(201).json({ ...event, tags });
 });
 
 const EventListSchema = v.object({
@@ -1500,7 +1698,8 @@ app.get('/api/v1/events', async (req: Request, res: Response) => {
               e.place_id AS "placeId", e.title, e.description,
               p.latitude, p.longitude, p.name AS "placeName", p.address AS "placeAddress",
               e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
-              o.name AS "organisationName"
+              o.name AS "organisationName",
+              COALESCE((SELECT json_agg(json_build_object('id', tg.id, 'name', tg.name)) FROM event_tags et JOIN tags tg ON tg.id = et.tag_id WHERE et.event_id = e.id), '[]'::json) AS "tags"
        FROM events e
        JOIN places p ON p.id = e.place_id
        LEFT JOIN organisations o ON o.id = e.organisation_id
@@ -1555,7 +1754,8 @@ app.get('/api/v1/events/area', async (req: Request, res: Response) => {
             e.place_id AS "placeId", e.title, e.description,
             p.latitude, p.longitude, p.name AS "placeName", p.address AS "placeAddress",
             e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
-            o.name AS "organisationName"
+            o.name AS "organisationName",
+            COALESCE((SELECT json_agg(json_build_object('id', tg.id, 'name', tg.name)) FROM event_tags et JOIN tags tg ON tg.id = et.tag_id WHERE et.event_id = e.id), '[]'::json) AS "tags"
      FROM events e
      JOIN places p ON p.id = e.place_id
      LEFT JOIN organisations o ON o.id = e.organisation_id
@@ -1584,7 +1784,8 @@ app.get('/api/v1/events/:id', async (req: Request, res: Response) => {
             e.place_id AS "placeId", e.title, e.description,
             p.latitude, p.longitude, p.name AS "placeName", p.address AS "placeAddress",
             e.start_date AS "startDate", e.end_date AS "endDate", e.created_at AS "createdAt",
-            o.name AS "organisationName"
+            o.name AS "organisationName",
+            COALESCE((SELECT json_agg(json_build_object('id', tg.id, 'name', tg.name)) FROM event_tags et JOIN tags tg ON tg.id = et.tag_id WHERE et.event_id = e.id), '[]'::json) AS "tags"
      FROM events e
      JOIN places p ON p.id = e.place_id
      LEFT JOIN organisations o ON o.id = e.organisation_id
@@ -1608,6 +1809,7 @@ const UpdateEventSchema = v.object({
   startDate: v.pipe(v.string(), v.isoTimestamp()),
   endDate: v.pipe(v.string(), v.isoTimestamp()),
   organisationId: v.optional(v.nullable(UuidSchema)),
+  tagIds: v.optional(v.array(UuidSchema)),
 });
 
 app.put('/api/v1/events/:id', async (req: Request, res: Response) => {
@@ -1668,7 +1870,36 @@ app.put('/api/v1/events/:id', async (req: Request, res: Response) => {
     ],
   );
 
-  res.status(200).json(row.rows[0]);
+  const updatedEvent = row.rows[0]!;
+  let updatedTags: { id: string; name: string }[] = [];
+
+  if (data.tagIds) {
+    await pool.query('DELETE FROM event_tags WHERE event_id = $1', [data.id]);
+    if (data.tagIds.length > 0) {
+      const tagCheck = await pool.query(
+        'SELECT id, name FROM tags WHERE id = ANY($1)',
+        [data.tagIds],
+      );
+      if (tagCheck.rows.length !== data.tagIds.length) {
+        res.status(404).json({ code: 'RESOURCE_NOT_FOUND_EXCEPTION' });
+        return;
+      }
+      const values = data.tagIds.map((_, i) => `($1, $${i + 2})`).join(', ');
+      await pool.query(
+        `INSERT INTO event_tags (event_id, tag_id) VALUES ${values}`,
+        [data.id, ...data.tagIds],
+      );
+      updatedTags = tagCheck.rows as { id: string; name: string }[];
+    }
+  } else {
+    const existingTags = await pool.query(
+      `SELECT tg.id, tg.name FROM event_tags et JOIN tags tg ON tg.id = et.tag_id WHERE et.event_id = $1`,
+      [data.id],
+    );
+    updatedTags = existingTags.rows as { id: string; name: string }[];
+  }
+
+  res.status(200).json({ ...updatedEvent, tags: updatedTags });
 });
 
 app.delete('/api/v1/events/:id', async (req: Request, res: Response) => {
@@ -1700,7 +1931,7 @@ app.delete('/api/v1/events/:id', async (req: Request, res: Response) => {
 
 // --- pages ---
 
-const PAGE_STYLE = `*{margin:0;padding:0;box-sizing:border-box}body{background:#fff;color:#000;font-family:monospace;font-size:16px}.c{max-width:1000px;margin:0 auto;padding:24px 16px}a{color:#000}nav{margin:8px 0 16px}nav .btn{margin:2px 0}#cityBtn{white-space:nowrap}hr{border:none;border-top:1px solid #000;margin:16px 0}input,select{border:1px solid #000;padding:6px;margin:4px 0 12px;width:100%;font-family:monospace;font-size:16px}button{border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer}#err{font-weight:bold;margin-top:12px}.dropdown{border:1px solid #000;max-height:150px;overflow-y:auto;display:none}.dropdown div{padding:4px 6px;cursor:pointer}.dropdown div:hover{background:#000;color:#fff}.bc{margin:8px 0;font-size:14px}.searchRow{display:flex;align-items:center;gap:12px;margin-bottom:12px}.searchRow input{flex:1;margin:0}.searchRow .btn{white-space:nowrap}#cityPicker{position:relative}#cityPicker input{width:180px;margin:0}#cityPicker .dropdown{position:absolute;right:0;width:180px;background:#fff;z-index:10}.btn{display:inline-block;border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer;text-decoration:none}.btn:hover{background:#000;color:#fff}`;
+const PAGE_STYLE = `*{margin:0;padding:0;box-sizing:border-box}body{background:#fff;color:#000;font-family:monospace;font-size:16px}.c{max-width:1000px;margin:0 auto;padding:24px 16px}a{color:#000}nav{margin:8px 0 16px}nav .btn{margin:2px 0}#cityBtn{white-space:nowrap}hr{border:none;border-top:1px solid #000;margin:16px 0}input,select{border:1px solid #000;padding:6px;margin:4px 0 12px;width:100%;font-family:monospace;font-size:16px}button{border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer}#err{font-weight:bold;margin-top:12px}.dropdown{border:1px solid #000;max-height:150px;overflow-y:auto;display:none}.dropdown div{padding:4px 6px;cursor:pointer}.dropdown div:hover{background:#000;color:#fff}.bc{margin:8px 0;font-size:14px}.searchRow{display:flex;align-items:center;gap:12px;margin-bottom:12px}.searchRow input{flex:1;margin:0}.searchRow .btn{white-space:nowrap}#cityPicker{position:relative}#cityPicker input{width:180px;margin:0}#cityPicker .dropdown{position:absolute;right:0;width:180px;background:#fff;z-index:10}.btn{display:inline-block;border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer;text-decoration:none}.btn:hover{background:#000;color:#fff}.tag{display:inline-block;border:1px solid #000;padding:2px 8px;margin:2px;font-size:14px}.tag-chip{display:inline-block;border:1px solid #000;padding:2px 8px;margin:2px;font-size:14px;cursor:pointer}.tag-chip:hover{background:#000;color:#fff}#tagChips{margin:4px 0}`;
 const PAGE_HEAD = `<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${PAGE_STYLE}</style>`;
 const NAV_SCRIPT = `<script>
 (function(){const t=localStorage.getItem('accessToken');if(!t)return;
@@ -1711,6 +1942,7 @@ if(ph==='/organisations-list'||ph.startsWith('/view/organisation/')||ph.startsWi
 else if(ph==='/places-list'||ph.startsWith('/view/place/'))ah='/places-list';
 else if(ph==='/countries-list')ah='/countries-list';
 else if(ph==='/cities-list')ah='/cities-list';
+else if(ph==='/tags-list'||ph.startsWith('/edit/tag/'))ah='/tags-list';
 else if(ph==='/profile')ah='/profile';
 document.querySelectorAll('nav a').forEach(function(a){if(a.getAttribute('href')===ah)a.style.fontWeight='bold'});
 })();
@@ -1797,7 +2029,7 @@ cityInput.onblur=function(){
 };
 })();
 </script>`;
-const APP_NAV = `<nav style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:4px"><span><a href="/" class="btn">Events</a> <a href="/organisations-list" class="btn">Organisations</a> <a href="/places-list" class="btn">Places</a> <span id="adminNav" style="display:none"><a href="/countries-list" class="btn">Countries</a> <a href="/cities-list" class="btn">Cities</a> </span><a href="/profile" class="btn">Profile</a></span><span id="cityPicker"><button id="cityBtn">All cities</button><span id="cityInputWrap" style="display:none"><input type="text" id="cityInput" placeholder="Search city..." autocomplete="off"><div class="dropdown" id="cityDrop"></div></span></span></nav>${NAV_SCRIPT}`;
+const APP_NAV = `<nav style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:4px"><span><a href="/" class="btn">Events</a> <a href="/organisations-list" class="btn">Organisations</a> <a href="/places-list" class="btn">Places</a> <span id="adminNav" style="display:none"><a href="/countries-list" class="btn">Countries</a> <a href="/cities-list" class="btn">Cities</a> <a href="/tags-list" class="btn">Tags</a> </span><a href="/profile" class="btn">Profile</a></span><span id="cityPicker"><button id="cityBtn">All cities</button><span id="cityInputWrap" style="display:none"><input type="text" id="cityInput" placeholder="Search city..." autocomplete="off"><div class="dropdown" id="cityDrop"></div></span></span></nav>${NAV_SCRIPT}`;
 
 const ORG_SEARCH_HTML = `Organisation (optional)<br><input type="text" id="orgSearch" placeholder="Search by name..." autocomplete="off"><input type="hidden" name="organisationId" id="orgId"><div class="dropdown" id="orgDrop"></div>`;
 const ORG_SEARCH_SCRIPT = `
@@ -1849,6 +2081,41 @@ document.getElementById('placeSearch').oninput=function(){
 };
 document.addEventListener('click',e=>{if(!e.target.closest('#placeSearch,#placeDrop'))document.getElementById('placeDrop').style.display='none'});`;
 
+const TAG_SEARCH_HTML = `Tags<br><div id="tagChips"></div><input type="text" id="tagSearch" placeholder="Search tags..." autocomplete="off"><div class="dropdown" id="tagDrop"></div>`;
+const TAG_SEARCH_SCRIPT = `
+let selectedTags=[];
+function renderTagChips(){
+  const c=document.getElementById('tagChips');c.innerHTML='';
+  for(const tag of selectedTags){
+    const s=document.createElement('span');s.className='tag-chip';s.textContent=tag.name+' x';
+    s.onclick=()=>{selectedTags=selectedTags.filter(t=>t.id!==tag.id);renderTagChips()};
+    c.appendChild(s);
+  }
+}
+let tagDebounce;
+document.getElementById('tagSearch').oninput=function(){
+  clearTimeout(tagDebounce);
+  const v=this.value;
+  const drop=document.getElementById('tagDrop');
+  if(v.length<1){drop.style.display='none';return}
+  tagDebounce=setTimeout(async()=>{
+    const r=await fetch('/api/v1/tags?name='+encodeURIComponent(v)+'&limit=10',{headers:{'Authorization':'Bearer '+localStorage.getItem('accessToken')}});
+    if(!r.ok)return;
+    const j=await r.json();
+    drop.innerHTML='';
+    const filtered=j.data.filter(t=>!selectedTags.some(s=>s.id===t.id));
+    if(filtered.length===0){drop.style.display='none';return}
+    for(const tag of filtered){
+      const d=document.createElement('div');
+      d.textContent=tag.name;
+      d.onclick=()=>{selectedTags.push({id:tag.id,name:tag.name});renderTagChips();document.getElementById('tagSearch').value='';drop.style.display='none'};
+      drop.appendChild(d);
+    }
+    drop.style.display='block';
+  },300);
+};
+document.addEventListener('click',e=>{if(!e.target.closest('#tagSearch,#tagDrop'))document.getElementById('tagDrop').style.display='none'});`;
+
 app.get('/', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>
 <html><head><title>Events</title>${PAGE_HEAD}<style>#end{display:none}</style>
@@ -1865,6 +2132,7 @@ ${PLACE_SEARCH_HTML}<br>
 Start<br><input type="datetime-local" id="evStart" required><br>
 End<br><input type="datetime-local" id="evEnd" required><br>
 ${ORG_SEARCH_HTML}<br>
+${TAG_SEARCH_HTML}<br>
 <button id="createBtn">Create</button>
 <p id="err"></p>
 <hr>
@@ -1887,6 +2155,7 @@ if(me.role==='admin'){
   document.getElementById('createForm').style.display='block';
   ${PLACE_SEARCH_SCRIPT}
   ${ORG_SEARCH_SCRIPT}
+  ${TAG_SEARCH_SCRIPT}
   document.getElementById('createBtn').onclick=async()=>{
     const title=document.getElementById('evTitle').value.trim();
     const description=document.getElementById('evDescription').value.trim();
@@ -1897,6 +2166,7 @@ if(me.role==='admin'){
     if(!title||!description||!placeId||!startDate||!endDate){document.getElementById('err').textContent='Please fill all required fields';return}
     const body={title,description,placeId,startDate:new Date(startDate).toISOString(),endDate:new Date(endDate).toISOString()};
     if(organisationId)body.organisationId=organisationId;
+    body.tagIds=selectedTags.map(t2=>t2.id);
     const r=await fetch('/api/v1/events',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify(body)});
     if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
     document.getElementById('err').textContent='';
@@ -1908,6 +2178,7 @@ if(me.role==='admin'){
     document.getElementById('evEnd').value='';
     document.getElementById('orgId').value='';
     document.getElementById('orgSearch').value='';
+    selectedTags=[];renderTagChips();document.getElementById('tagSearch').value='';
     page=1;done=false;lastDateLabel='';
     document.getElementById('list').innerHTML='';
     load();
@@ -1960,8 +2231,8 @@ async function load(){
       list.appendChild(h);
     }
     const dv=document.createElement('div');
-    let evHtml='<a href="/view/event/'+ev.id+'"><b>'+esc(ev.title)+'</b></a><br>'
-      +esc(ev.description)+'<br>';
+    let evHtml='<a href="/view/event/'+ev.id+'"><b>'+esc(ev.title)+'</b></a><br>';
+    if(ev.tags&&ev.tags.length>0){for(const tag of ev.tags){evHtml+='<span class="tag">'+esc(tag.name)+'</span> ';}evHtml+='<br>';}
     if(ev.placeName)evHtml+='<small>Place: <a href="/view/place/'+ev.placeId+'">'+esc(ev.placeName)+'</a></small><br>';
     if(ev.organisationName)evHtml+='<small>Organisation: <a href="/view/organisation/'+ev.organisationId+'">'+esc(ev.organisationName)+'</a></small><br>';
     if(me.role==='admin')evHtml+='<a href="/edit/event/'+ev.id+'" class="btn">edit</a> <a href="#" class="btn delEv" data-id="'+ev.id+'">delete</a><br>';
@@ -1972,7 +2243,6 @@ async function load(){
   list.querySelectorAll('.delEv').forEach(a=>{
     a.onclick=async e=>{
       e.preventDefault();
-      if(!confirm('Delete this event?'))return;
       const r2=await fetch('/api/v1/events/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
       if(!r2.ok){return}
       a.closest('div').remove();
@@ -2082,7 +2352,6 @@ async function load(){
   list.querySelectorAll('.delOrg').forEach(a=>{
     a.onclick=async e=>{
       e.preventDefault();
-      if(!confirm('Delete this organisation?'))return;
       const r2=await fetch('/api/v1/organisations/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
       if(!r2.ok){const j2=await r2.json();document.getElementById('err').textContent=j2.code||JSON.stringify(j2);return}
       document.getElementById('err').textContent='';
@@ -2137,8 +2406,9 @@ try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const ev=await r.json();
   document.getElementById('bc').innerHTML='<a href="/">Events</a> / '+esc(ev.title);
-  let html='<p>Description: '+esc(ev.description)+'</p>'
-    +'<p>Place: <a href="/view/place/'+ev.placeId+'">'+esc(ev.placeName)+'</a> - '+esc(ev.placeAddress)+'</p>'
+  let html='<p>Description: '+esc(ev.description)+'</p>';
+  if(ev.tags&&ev.tags.length>0){html+='<p>Tags: ';for(const tag of ev.tags){html+='<span class="tag">'+esc(tag.name)+'</span> ';}html+='</p>';}
+  html+='<p>Place: <a href="/view/place/'+ev.placeId+'">'+esc(ev.placeName)+'</a> - '+esc(ev.placeAddress)+'</p>'
     +'<p>Start: '+new Date(ev.startDate).toLocaleString()+'</p>'
     +'<p>End: '+new Date(ev.endDate).toLocaleString()+'</p>';
   if(ev.organisationId)html+='<p>Organisation: <a href="/view/organisation/'+ev.organisationId+'">'+esc(ev.organisationName||ev.organisationId)+'</a></p>';
@@ -2151,7 +2421,6 @@ try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
   if(canEdit){
     document.getElementById('deleteBtn').onclick=async function(e){
       e.preventDefault();
-      if(!confirm('Delete this event?'))return;
       const dr=await fetch('/api/v1/events/'+id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
       if(!dr.ok){const dj=await dr.json();document.getElementById('err').textContent=dj.code||JSON.stringify(dj);return}
       window.location.href='/';
@@ -2201,7 +2470,6 @@ try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
   if(me.role==='admin'){
     document.getElementById('deleteBtn').onclick=async function(e){
       e.preventDefault();
-      if(!confirm('Delete this organisation?'))return;
       const dr=await fetch('/api/v1/organisations/'+id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
       if(!dr.ok){const dj=await dr.json();document.getElementById('err').textContent=dj.code||JSON.stringify(dj);return}
       window.location.href='/organisations-list';
@@ -2240,8 +2508,9 @@ async function loadEvents(){
       list.appendChild(h);
     }
     const d=document.createElement('div');
-    let evHtml='<a href="/view/event/'+ev.id+'"><b>'+esc(ev.title)+'</b></a><br>'
-      +esc(ev.description)+'<br><hr>';
+    let evHtml='<a href="/view/event/'+ev.id+'"><b>'+esc(ev.title)+'</b></a><br>';
+    if(ev.tags&&ev.tags.length>0){for(const tag of ev.tags){evHtml+='<span class="tag">'+esc(tag.name)+'</span> ';}evHtml+='<br>';}
+    evHtml+='<hr>';
     d.innerHTML=evHtml;
     list.appendChild(d);
   }
@@ -2320,8 +2589,8 @@ async function loadEvents(){
       list.appendChild(h);
     }
     const d=document.createElement('div');
-    let evHtml='<a href="/view/event/'+ev.id+'"><b>'+esc(ev.title)+'</b></a><br>'
-      +esc(ev.description)+'<br>';
+    let evHtml='<a href="/view/event/'+ev.id+'"><b>'+esc(ev.title)+'</b></a><br>';
+    if(ev.tags&&ev.tags.length>0){for(const tag of ev.tags){evHtml+='<span class="tag">'+esc(tag.name)+'</span> ';}evHtml+='<br>';}
     if(ev.organisationName)evHtml+='<small>Organisation: <a href="/view/organisation/'+ev.organisationId+'">'+esc(ev.organisationName)+'</a></small><br>';
     evHtml+='<hr>';
     d.innerHTML=evHtml;
@@ -2354,6 +2623,7 @@ ${PLACE_SEARCH_HTML}<br>
 Start<br><input type="datetime-local" name="startDate" required><br>
 End<br><input type="datetime-local" name="endDate" required><br>
 ${ORG_SEARCH_HTML}<br>
+${TAG_SEARCH_HTML}<br>
 <button type="submit">Update</button>
 </form>
 <p id="err"></p>
@@ -2364,6 +2634,7 @@ try{const p=JSON.parse(atob(localStorage.getItem('accessToken').split('.')[1]));
 const eventId=window.location.pathname.split('/').pop();
 ${PLACE_SEARCH_SCRIPT}
 ${ORG_SEARCH_SCRIPT}
+${TAG_SEARCH_SCRIPT}
 (async()=>{
   const _t=localStorage.getItem('accessToken');
   const r=await fetch('/api/v1/events/'+eventId,{headers:{'Authorization':'Bearer '+_t}});
@@ -2385,6 +2656,7 @@ ${ORG_SEARCH_SCRIPT}
     const or=await fetch('/api/v1/organisations/'+ev.organisationId,{headers:{'Authorization':'Bearer '+_t}});
     if(or.ok){const oj=await or.json();document.getElementById('orgSearch').value=oj.name}
   }
+  if(ev.tags&&ev.tags.length>0){selectedTags=ev.tags;renderTagChips()}
 })();
 document.getElementById('f').onsubmit=async e=>{
   e.preventDefault();
@@ -2393,6 +2665,7 @@ document.getElementById('f').onsubmit=async e=>{
   const body={title:fd.title,description:fd.description,placeId:fd.placeId,startDate:new Date(fd.startDate).toISOString(),endDate:new Date(fd.endDate).toISOString()};
   if(fd.organisationId)body.organisationId=fd.organisationId;
   else body.organisationId=null;
+  body.tagIds=selectedTags.map(t2=>t2.id);
   const r=await fetch('/api/v1/events/'+eventId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('accessToken')},body:JSON.stringify(body)});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
   window.location.href='/view/event/'+eventId;
@@ -2521,7 +2794,6 @@ async function loadList(){
   list.querySelectorAll('.del').forEach(a=>{
     a.onclick=async e=>{
       e.preventDefault();
-      if(!confirm('Delete this country?'))return;
       const r=await fetch('/api/v1/countries/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
       if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
       document.getElementById('err').textContent='';
@@ -2647,7 +2919,6 @@ async function loadList(){
   list.querySelectorAll('.del').forEach(a=>{
     a.onclick=async e=>{
       e.preventDefault();
-      if(!confirm('Delete this city?'))return;
       const r=await fetch('/api/v1/cities/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
       if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
       document.getElementById('err').textContent='';
@@ -2834,7 +3105,6 @@ async function load(){
   list.querySelectorAll('.del').forEach(a=>{
     a.onclick=async e=>{
       e.preventDefault();
-      if(!confirm('Delete this place?'))return;
       const r=await fetch('/api/v1/places/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
       if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
       document.getElementById('err').textContent='';
@@ -2864,6 +3134,170 @@ window.addEventListener('scroll',()=>{
 });
 window.onCityChange=function(){page=1;done=false;document.getElementById('list').innerHTML='';document.getElementById('end').style.display='none';load()};
 load();
+</script>
+</body></html>`);
+});
+
+app.get('/tags-list', (_req: Request, res: Response) => {
+  res.type('html').send(`<!DOCTYPE html>
+<html><head><title>Events</title>${PAGE_HEAD}<style>#end{display:none}</style></head><body>
+<div class="c">
+<h1>Events</h1>
+${APP_NAV}
+<hr>
+<div id="createForm">
+<b>Add tag</b><br>
+<input type="text" id="tagName" placeholder="Tag name" required>
+<button id="createBtn">Create</button>
+</div>
+<br>
+<div id="editForm" style="display:none">
+<b>Edit tag</b><br>
+<input type="text" id="editName" placeholder="Tag name" required>
+<button id="saveBtn">Save</button> <button id="cancelBtn">Cancel</button>
+</div>
+<p id="err"></p>
+<hr>
+<p class="bc">Tags /</p>
+<input type="text" id="searchInput" placeholder="Search tags..." style="margin-bottom:12px">
+<div id="list"></div>
+<p id="loading">Loading...</p>
+<p id="end">---</p>
+</div>
+<script>
+if(!localStorage.getItem('accessToken'))window.location.href='/login';
+try{const p=JSON.parse(atob(localStorage.getItem('accessToken').split('.')[1]));if(p.role!=='admin')window.location.href='/'}catch{window.location.href='/login'}
+const t=localStorage.getItem('accessToken');
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+let editId=null;
+
+document.getElementById('createBtn').onclick=async()=>{
+  const name=document.getElementById('tagName').value.trim();
+  if(!name)return;
+  const r=await fetch('/api/v1/tags',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name})});
+  if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+  document.getElementById('tagName').value='';
+  document.getElementById('err').textContent='';
+  page=1;done=false;
+  document.getElementById('list').innerHTML='';
+  document.getElementById('end').style.display='none';
+  load();
+};
+
+document.getElementById('saveBtn').onclick=async()=>{
+  const name=document.getElementById('editName').value.trim();
+  if(!name||!editId)return;
+  const r=await fetch('/api/v1/tags/'+editId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name})});
+  if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+  document.getElementById('editForm').style.display='none';
+  document.getElementById('createForm').style.display='block';
+  editId=null;
+  document.getElementById('err').textContent='';
+  page=1;done=false;
+  document.getElementById('list').innerHTML='';
+  document.getElementById('end').style.display='none';
+  load();
+};
+
+document.getElementById('cancelBtn').onclick=()=>{
+  document.getElementById('editForm').style.display='none';
+  document.getElementById('createForm').style.display='block';
+  editId=null;
+};
+
+let page=1;const limit=20;let loading=false;let done=false;
+let searchTerm='';
+let searchDebounce;
+document.getElementById('searchInput').oninput=function(){
+  clearTimeout(searchDebounce);
+  const v=this.value.trim();
+  searchDebounce=setTimeout(()=>{
+    if(v.length>=1){searchTerm=v}else{searchTerm=''}
+    page=1;done=false;
+    document.getElementById('list').innerHTML='';
+    document.getElementById('end').style.display='none';
+    load();
+  },300);
+};
+async function load(){
+  if(loading||done)return;
+  loading=true;
+  document.getElementById('loading').style.display='block';
+  let url='/api/v1/tags?page='+page+'&limit='+limit;
+  if(searchTerm)url+='&name='+encodeURIComponent(searchTerm);
+  const r=await fetch(url,{headers:{'Authorization':'Bearer '+t}});
+  if(!r.ok){loading=false;document.getElementById('loading').style.display='none';return}
+  const j=await r.json();
+  const list=document.getElementById('list');
+  for(const tag of j.data){
+    const d=document.createElement('div');
+    d.innerHTML='<span class="tag">'+esc(tag.name)+'</span> <a href="#" class="btn edit" data-id="'+tag.id+'" data-name="'+esc(tag.name)+'">edit</a> <a href="#" class="btn del" data-id="'+tag.id+'">delete</a><hr>';
+    list.appendChild(d);
+  }
+  list.querySelectorAll('.edit').forEach(a=>{
+    a.onclick=e=>{
+      e.preventDefault();
+      editId=a.dataset.id;
+      document.getElementById('editName').value=a.dataset.name;
+      document.getElementById('editForm').style.display='block';
+      document.getElementById('createForm').style.display='none';
+    };
+  });
+  list.querySelectorAll('.del').forEach(a=>{
+    a.onclick=async e=>{
+      e.preventDefault();
+      const r2=await fetch('/api/v1/tags/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
+      if(!r2.ok){const j2=await r2.json();document.getElementById('err').textContent=j2.code||JSON.stringify(j2);return}
+      document.getElementById('err').textContent='';
+      a.closest('div').remove();
+    };
+  });
+  if(page*limit>=j.count){done=true;document.getElementById('end').style.display='block'}
+  else{page++}
+  loading=false;
+  document.getElementById('loading').style.display=done?'none':'block';
+}
+window.addEventListener('scroll',()=>{
+  if(window.innerHeight+window.scrollY>=document.body.offsetHeight-200)load();
+});
+load();
+</script>
+</body></html>`);
+});
+
+app.get('/edit/tag/:id', (_req: Request, res: Response) => {
+  res.type('html').send(`<!DOCTYPE html>
+<html><head><title>Events</title>${PAGE_HEAD}</head><body>
+<div class="c">
+<h1>Events</h1>
+${APP_NAV}
+<hr>
+<p class="bc" id="bc"><a href="/tags-list">Tags</a> /</p>
+<form id="f">
+Name<br><input type="text" name="name" minlength="1" maxlength="256" required><br><br>
+<button type="submit">Update</button>
+</form>
+<p id="err"></p>
+</div>
+<script>
+if(!localStorage.getItem('accessToken'))window.location.href='/login';
+try{const p=JSON.parse(atob(localStorage.getItem('accessToken').split('.')[1]));if(p.role!=='admin')window.location.href='/'}catch{window.location.href='/login'}
+const tagId=window.location.pathname.split('/').pop();
+(async()=>{
+  const r=await fetch('/api/v1/tags/'+tagId,{headers:{'Authorization':'Bearer '+localStorage.getItem('accessToken')}});
+  if(!r.ok){document.getElementById('err').textContent='Not found';return}
+  const tag=await r.json();
+  function _esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+  document.getElementById('bc').innerHTML='<a href="/tags-list">Tags</a> / '+_esc(tag.name)+' / Edit';
+  document.getElementById('f').name.value=tag.name;
+})();
+document.getElementById('f').onsubmit=async e=>{
+  e.preventDefault();
+  const fd=Object.fromEntries(new FormData(e.target));
+  const r=await fetch('/api/v1/tags/'+tagId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('accessToken')},body:JSON.stringify({name:fd.name})});
+  if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
+  window.location.href='/tags-list';
+};
 </script>
 </body></html>`);
 });

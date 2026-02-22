@@ -1003,6 +1003,11 @@ paths:
                   type: string
                   format: uuid
                   nullable: true
+                tagIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
       responses:
         "201":
           description: Event created
@@ -1200,6 +1205,11 @@ paths:
                   type: string
                   format: uuid
                   nullable: true
+                tagIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
       responses:
         "200":
           description: Event updated
@@ -1328,6 +1338,181 @@ paths:
           $ref: "#/components/responses/ValidationException"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/tags:
+    post:
+      summary: Create tag (admin only)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 256
+      responses:
+        "201":
+          description: Tag created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tag"
+        "400":
+          $ref: "#/components/responses/ValidationException"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Name already taken
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: TAG_NAME_ALREADY_TAKEN_EXCEPTION
+
+    get:
+      summary: List tags
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: name
+          in: query
+          description: Partial name search (case-insensitive)
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Tag"
+                  count:
+                    type: integer
+        "400":
+          $ref: "#/components/responses/ValidationException"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/tags/{id}:
+    get:
+      summary: Get tag by ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Tag found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tag"
+        "400":
+          $ref: "#/components/responses/ValidationException"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    put:
+      summary: Update tag (admin only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 256
+      responses:
+        "200":
+          description: Tag updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tag"
+        "400":
+          $ref: "#/components/responses/ValidationException"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Name already taken
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCode"
+              example:
+                code: TAG_NAME_ALREADY_TAKEN_EXCEPTION
+
+    delete:
+      summary: Delete tag (admin only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Tag deleted
+        "400":
+          $ref: "#/components/responses/ValidationException"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /api/v1/favourite-organisations:
     post:
@@ -1534,6 +1719,21 @@ components:
             countryName:
               type: string
 
+    Tag:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        humanId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
     EventBase:
       description: Event as returned by create/update (without joined place/org data)
       type: object
@@ -1564,6 +1764,16 @@ components:
         createdAt:
           type: string
           format: date-time
+        tags:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              name:
+                type: string
 
     Event:
       description: Event as returned by list/get (with joined place and organisation data)
@@ -1582,6 +1792,16 @@ components:
             organisationName:
               type: string
               nullable: true
+            tags:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  name:
+                    type: string
 
   responses:
     ValidationException:
