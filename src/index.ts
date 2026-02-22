@@ -2744,8 +2744,8 @@ app.get('/places-list', (_req: Request, res: Response) => {
 <div class="c">
 <h1>Events</h1>
 ${APP_NAV}
-<hr>
 <div id="createForm" style="display:none">
+<hr>
 <b>Add place</b><br>
 Name<br><input type="text" id="placeName" placeholder="Place name" required><br>
 Address<br><input type="text" id="placeAddress" placeholder="Address" required><br>
