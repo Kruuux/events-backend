@@ -1931,7 +1931,7 @@ app.delete('/api/v1/events/:id', async (req: Request, res: Response) => {
 
 // --- pages ---
 
-const PAGE_STYLE = `*{margin:0;padding:0;box-sizing:border-box}body{background:#fff;color:#000;font-family:monospace;font-size:16px}.c{max-width:1000px;margin:0 auto;padding:24px 16px}a{color:#000}nav{margin:8px 0 16px}nav .btn{margin:2px 0}#cityBtn{white-space:nowrap}hr{border:none;border-top:1px solid #000;margin:16px 0}input,select{border:1px solid #000;padding:6px;margin:4px 0 12px;width:100%;font-family:monospace;font-size:16px}button{border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer}#err{font-weight:bold;margin-top:12px}.dropdown{border:1px solid #000;max-height:150px;overflow-y:auto;display:none}.dropdown div{padding:4px 6px;cursor:pointer}.dropdown div:hover{background:#000;color:#fff}.bc{margin:8px 0;font-size:14px}.searchRow{display:flex;align-items:center;gap:12px;margin-bottom:12px}.searchRow input{flex:1;margin:0}.searchRow .btn{white-space:nowrap}#cityPicker{position:relative}#cityPicker input{width:180px;margin:0}#cityPicker .dropdown{position:absolute;right:0;width:180px;background:#fff;z-index:10}.btn{display:inline-block;border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer;text-decoration:none}.btn:hover{background:#000;color:#fff}.tag{display:inline-block;border:1px solid #000;padding:2px 8px;margin:2px;font-size:14px}.tag-chip{display:inline-block;border:1px solid #000;padding:2px 8px;margin:2px;font-size:14px;cursor:pointer}.tag-chip:hover{background:#000;color:#fff}#tagChips{margin:4px 0}`;
+const PAGE_STYLE = `*{margin:0;padding:0;box-sizing:border-box}body{background:#fff;color:#000;font-family:monospace;font-size:16px}.c{max-width:1000px;margin:0 auto;padding:24px 16px}a{color:#000}nav{margin:8px 0 16px}nav .btn{margin:2px 0}#cityBtn{white-space:nowrap}hr{border:none;border-top:1px solid #000;margin:16px 0}input,select{border:1px solid #000;padding:6px;margin:4px 0 12px;width:100%;font-family:monospace;font-size:16px}button{border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer}#err{font-weight:bold;margin-top:12px}.dropdown{border:1px solid #000;max-height:150px;overflow-y:auto;display:none}.dropdown div{padding:4px 6px;cursor:pointer}.dropdown div:hover{background:#000;color:#fff}.bc{margin:8px 0;font-size:14px}.searchRow{display:flex;align-items:center;gap:12px;margin-bottom:12px}.searchRow input{flex:1;margin:0}.searchRow .btn{white-space:nowrap}#cityPicker{position:relative}#cityPicker input{width:180px;margin:0}#cityPicker .dropdown{position:absolute;right:0;width:180px;background:#fff;z-index:10}.btn{display:inline-block;border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer;text-decoration:none;margin-bottom:4px}.btn:hover{background:#000;color:#fff}.tag{display:inline-block;border:1px solid #000;padding:2px 8px;margin:2px;font-size:14px}.tag-chip{display:inline-block;border:1px solid #000;padding:2px 8px;margin:2px;font-size:14px;cursor:pointer}.tag-chip:hover{background:#000;color:#fff}#tagChips{margin:4px 0}`;
 const PAGE_HEAD = `<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${PAGE_STYLE}</style>`;
 const NAV_SCRIPT = `<script>
 (function(){const t=localStorage.getItem('accessToken');if(!t)return;
@@ -2235,7 +2235,7 @@ async function load(){
     if(ev.tags&&ev.tags.length>0){for(const tag of ev.tags){evHtml+='<span class="tag">'+esc(tag.name)+'</span> ';}evHtml+='<br>';}
     if(ev.placeName)evHtml+='<small>Place: <a href="/view/place/'+ev.placeId+'">'+esc(ev.placeName)+'</a></small><br>';
     if(ev.organisationName)evHtml+='<small>Organisation: <a href="/view/organisation/'+ev.organisationId+'">'+esc(ev.organisationName)+'</a></small><br>';
-    if(me.role==='admin')evHtml+='<a href="/edit/event/'+ev.id+'" class="btn">edit</a> <a href="#" class="btn delEv" data-id="'+ev.id+'">delete</a><br>';
+    if(me.role==='admin')evHtml+='<div style="margin-top:8px"><a href="/edit/event/'+ev.id+'" class="btn">edit</a> <a href="#" class="btn delEv" data-id="'+ev.id+'">delete</a></div>';
     evHtml+='<hr>';
     dv.innerHTML=evHtml;
     list.appendChild(dv);
@@ -2343,8 +2343,8 @@ async function load(){
   for(const o of j.data){
     const dv=document.createElement('div');
     let oHtml='<a href="/view/organisation/'+o.id+'"><b>'+esc(o.name)+'</b></a>';
-    if(me.role==='admin')oHtml+=' <a href="/edit/organisation/'+o.id+'" class="btn">edit</a> <a href="#" class="btn delOrg" data-id="'+o.id+'">delete</a>';
     oHtml+=' <a href="#" class="btn favOrg" style="float:right" data-id="'+o.id+'" data-fav="'+o.isFavourite+'">'+(o.isFavourite?'Remove from favourites':'Add to favourites')+'</a>';
+    if(me.role==='admin')oHtml+='<div style="margin-top:8px"><a href="/edit/organisation/'+o.id+'" class="btn">edit</a> <a href="#" class="btn delOrg" data-id="'+o.id+'">delete</a></div>';
     oHtml+='<hr>';
     dv.innerHTML=oHtml;
     list.appendChild(dv);
@@ -2779,7 +2779,7 @@ async function loadList(){
   list.innerHTML='';
   for(const c of j.data){
     const d=document.createElement('div');
-    d.innerHTML=esc(c.name)+' <a href="#" class="btn edit" data-id="'+c.id+'" data-name="'+esc(c.name)+'">edit</a> <a href="#" class="btn del" data-id="'+c.id+'">delete</a><hr>';
+    d.innerHTML='<b>'+esc(c.name)+'</b><div style="margin-top:8px"><a href="#" class="btn edit" data-id="'+c.id+'" data-name="'+esc(c.name)+'">edit</a> <a href="#" class="btn del" data-id="'+c.id+'">delete</a></div><hr>';
     list.appendChild(d);
   }
   list.querySelectorAll('.edit').forEach(a=>{
@@ -2903,7 +2903,7 @@ async function loadList(){
   list.innerHTML='';
   for(const c of j.data){
     const d=document.createElement('div');
-    d.innerHTML=esc(c.name)+' <small>('+esc(c.countryName)+')</small> <a href="#" class="btn edit" data-id="'+c.id+'" data-name="'+esc(c.name)+'" data-country="'+c.countryId+'">edit</a> <a href="#" class="btn del" data-id="'+c.id+'">delete</a><hr>';
+    d.innerHTML='<b>'+esc(c.name)+'</b> <small>('+esc(c.countryName)+')</small><div style="margin-top:8px"><a href="#" class="btn edit" data-id="'+c.id+'" data-name="'+esc(c.name)+'" data-country="'+c.countryId+'">edit</a> <a href="#" class="btn del" data-id="'+c.id+'">delete</a></div><hr>';
     list.appendChild(d);
   }
   list.querySelectorAll('.edit').forEach(a=>{
@@ -3078,13 +3078,14 @@ async function load(){
   const list=document.getElementById('list');
   for(const p of j.data){
     const d=document.createElement('div');
-    let pHtml='<a href="/view/place/'+p.id+'"><b>'+esc(p.name)+'</b></a><br>'+esc(p.address)+' <small>('+esc(p.cityName)+', '+esc(p.countryName)+')</small><br>'
+    let pHtml='<a href="/view/place/'+p.id+'"><b>'+esc(p.name)+'</b></a>'
+      +' <a href="#" class="btn favPlace" style="float:right" data-id="'+p.id+'" data-fav="'+p.isFavourite+'">'+(p.isFavourite?'Remove from favourites':'Add to favourites')+'</a>'
+      +'<br>'+esc(p.address)+' <small>('+esc(p.cityName)+', '+esc(p.countryName)+')</small><br>'
       +'<small>Lat: '+p.latitude+', Lng: '+p.longitude+'</small>';
     if(me.role==='admin'){
-      pHtml+=' <a href="#" class="btn edit" data-id="'+p.id+'" data-name="'+esc(p.name)+'" data-address="'+esc(p.address)+'" data-lat="'+p.latitude+'" data-lng="'+p.longitude+'" data-city="'+p.cityId+'">edit</a>'
-        +' <a href="#" class="btn del" data-id="'+p.id+'">delete</a>';
+      pHtml+='<div style="margin-top:8px"><a href="#" class="btn edit" data-id="'+p.id+'" data-name="'+esc(p.name)+'" data-address="'+esc(p.address)+'" data-lat="'+p.latitude+'" data-lng="'+p.longitude+'" data-city="'+p.cityId+'">edit</a>'
+        +' <a href="#" class="btn del" data-id="'+p.id+'">delete</a></div>';
     }
-    pHtml+=' <a href="#" class="btn favPlace" style="float:right" data-id="'+p.id+'" data-fav="'+p.isFavourite+'">'+(p.isFavourite?'Remove from favourites':'Add to favourites')+'</a>';
     pHtml+='<hr>';
     d.innerHTML=pHtml;
     list.appendChild(d);
@@ -3231,7 +3232,7 @@ async function load(){
   const list=document.getElementById('list');
   for(const tag of j.data){
     const d=document.createElement('div');
-    d.innerHTML='<span class="tag">'+esc(tag.name)+'</span> <a href="#" class="btn edit" data-id="'+tag.id+'" data-name="'+esc(tag.name)+'">edit</a> <a href="#" class="btn del" data-id="'+tag.id+'">delete</a><hr>';
+    d.innerHTML='<span class="tag">'+esc(tag.name)+'</span><div style="margin-top:8px"><a href="#" class="btn edit" data-id="'+tag.id+'" data-name="'+esc(tag.name)+'">edit</a> <a href="#" class="btn del" data-id="'+tag.id+'">delete</a></div><hr>';
     list.appendChild(d);
   }
   list.querySelectorAll('.edit').forEach(a=>{
