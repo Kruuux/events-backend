@@ -269,6 +269,12 @@ const HumanSearchSchema = v.object({
 });
 
 app.get('/api/v1/humans', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+
   const query = validate(HumanSearchSchema, req.query, res);
   if (!query) return;
 
@@ -331,6 +337,12 @@ const OrganisationListSchema = v.object({
 });
 
 app.get('/api/v1/organisations', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+
   const query = validate(OrganisationListSchema, req.query, res);
   if (!query) return;
 
@@ -358,6 +370,12 @@ app.get('/api/v1/organisations', async (req: Request, res: Response) => {
 });
 
 app.get('/api/v1/organisations/:id', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+
   const params = validate(IdParamSchema, req.params, res);
   if (!params) return;
 
@@ -451,6 +469,12 @@ app.delete('/api/v1/organisations/:id', async (req: Request, res: Response) => {
 app.get(
   '/api/v1/organisations/:organisationId/events',
   async (req: Request, res: Response) => {
+    const payload = authenticate(req);
+    if (!payload) {
+      res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+      return;
+    }
+
     const organisationId = req.params.organisationId;
     const query = validate(PaginationSchema, req.query, res);
     if (!query) return;
@@ -487,6 +511,12 @@ app.get(
 );
 
 app.get('/api/v1/places/:placeId/events', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+
   const placeId = req.params.placeId;
   const query = validate(PaginationSchema, req.query, res);
   if (!query) return;
@@ -571,6 +601,12 @@ const CountryListSchema = v.object({
 });
 
 app.get('/api/v1/countries', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+
   const query = validate(CountryListSchema, req.query, res);
   if (!query) return;
 
@@ -597,6 +633,12 @@ app.get('/api/v1/countries', async (req: Request, res: Response) => {
 });
 
 app.get('/api/v1/countries/:id', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+
   const params = validate(IdParamSchema, req.params, res);
   if (!params) return;
 
@@ -748,6 +790,12 @@ const CityListSchema = v.object({
 });
 
 app.get('/api/v1/cities', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+
   const query = validate(CityListSchema, req.query, res);
   if (!query) return;
 
@@ -807,6 +855,12 @@ app.get('/api/v1/cities', async (req: Request, res: Response) => {
 });
 
 app.get('/api/v1/cities/:id', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+
   const params = validate(IdParamSchema, req.params, res);
   if (!params) return;
 
@@ -961,6 +1015,12 @@ const PlaceListSchema = v.object({
 });
 
 app.get('/api/v1/places', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+
   const query = validate(PlaceListSchema, req.query, res);
   if (!query) return;
 
@@ -1024,6 +1084,12 @@ app.get('/api/v1/places', async (req: Request, res: Response) => {
 });
 
 app.get('/api/v1/places/:id', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+
   const params = validate(IdParamSchema, req.params, res);
   if (!params) return;
 
@@ -1195,6 +1261,12 @@ app.post('/api/v1/events', async (req: Request, res: Response) => {
 });
 
 app.get('/api/v1/events', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+
   const query = validate(PaginationSchema, req.query, res);
   if (!query) return;
 
@@ -1241,6 +1313,12 @@ const EventsAreaSchema = v.object({
 });
 
 app.get('/api/v1/events/area', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+
   const query = validate(EventsAreaSchema, req.query, res);
   if (!query) return;
 
@@ -1273,6 +1351,12 @@ app.get('/api/v1/events/area', async (req: Request, res: Response) => {
 });
 
 app.get('/api/v1/events/:id', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+
   const params = validate(IdParamSchema, req.params, res);
   if (!params) return;
 
@@ -1511,7 +1595,7 @@ if(me.role==='admin'){
     if(!title||!description||!placeId||!startDate||!endDate){document.getElementById('err').textContent='Please fill all required fields';return}
     const body={title,description,placeId,startDate:new Date(startDate).toISOString(),endDate:new Date(endDate).toISOString()};
     if(organisationId)body.organisationId=organisationId;
-    const r=await fetch('/events',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify(body)});
+    const r=await fetch('/api/v1/events',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify(body)});
     if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
     document.getElementById('err').textContent='';
     document.getElementById('evTitle').value='';
@@ -1545,7 +1629,7 @@ async function load(){
   if(loading||done)return;
   loading=true;
   document.getElementById('loading').style.display='block';
-  const r=await fetch('/events?page='+page+'&limit='+limit);
+  const r=await fetch('/api/v1/events?page='+page+'&limit='+limit);
   if(!r.ok){loading=false;document.getElementById('loading').style.display='none';return}
   const j=await r.json();
   const list=document.getElementById('list');
@@ -1572,7 +1656,7 @@ async function load(){
     a.onclick=async e=>{
       e.preventDefault();
       if(!confirm('Delete this event?'))return;
-      const r2=await fetch('/events/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
+      const r2=await fetch('/api/v1/events/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
       if(!r2.ok){return}
       a.closest('div').remove();
     };
@@ -1618,7 +1702,7 @@ async function loadArea(){
   }
   msg.textContent='';
 
-  const r=await fetch('/events/area?minLat='+minLat+'&maxLat='+maxLat+'&minLng='+minLng+'&maxLng='+maxLng);
+  const r=await fetch('/api/v1/events/area?minLat='+minLat+'&maxLat='+maxLat+'&minLng='+minLng+'&maxLng='+maxLng);
   if(!r.ok)return;
   const j=await r.json();
   for(const ev of j.data){
@@ -1757,7 +1841,7 @@ const t=localStorage.getItem('accessToken');
 let me={};
 try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
 (async()=>{
-  const r=await fetch('/events/'+id);
+  const r=await fetch('/api/v1/events/'+id);
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const ev=await r.json();
   document.getElementById('title').textContent=ev.title;
@@ -1776,7 +1860,7 @@ try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
     document.getElementById('deleteBtn').onclick=async function(e){
       e.preventDefault();
       if(!confirm('Delete this event?'))return;
-      const dr=await fetch('/events/'+id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
+      const dr=await fetch('/api/v1/events/'+id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
       if(!dr.ok){const dj=await dr.json();document.getElementById('err').textContent=dj.code||JSON.stringify(dj);return}
       window.location.href='/';
     };
@@ -1983,7 +2067,7 @@ const eventId=window.location.pathname.split('/').pop();
 ${PLACE_SEARCH_SCRIPT}
 ${ORG_SEARCH_SCRIPT}
 (async()=>{
-  const r=await fetch('/events/'+eventId);
+  const r=await fetch('/api/v1/events/'+eventId);
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const ev=await r.json();
   const f=document.getElementById('f');
@@ -2008,7 +2092,7 @@ document.getElementById('f').onsubmit=async e=>{
   const body={title:fd.title,description:fd.description,placeId:fd.placeId,startDate:new Date(fd.startDate).toISOString(),endDate:new Date(fd.endDate).toISOString()};
   if(fd.organisationId)body.organisationId=fd.organisationId;
   else body.organisationId=null;
-  const r=await fetch('/events/'+eventId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('accessToken')},body:JSON.stringify(body)});
+  const r=await fetch('/api/v1/events/'+eventId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('accessToken')},body:JSON.stringify(body)});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
   window.location.href='/view/event/'+eventId;
 };
@@ -2084,7 +2168,7 @@ let editId=null;
 document.getElementById('createBtn').onclick=async()=>{
   const name=document.getElementById('countryName').value.trim();
   if(!name)return;
-  const r=await fetch('/countries',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name})});
+  const r=await fetch('/api/v1/countries',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name})});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
   document.getElementById('countryName').value='';
   document.getElementById('err').textContent='';
@@ -2094,7 +2178,7 @@ document.getElementById('createBtn').onclick=async()=>{
 document.getElementById('saveBtn').onclick=async()=>{
   const name=document.getElementById('editName').value.trim();
   if(!name||!editId)return;
-  const r=await fetch('/countries/'+editId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name})});
+  const r=await fetch('/api/v1/countries/'+editId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name})});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
   document.getElementById('editForm').style.display='none';
   document.getElementById('createForm').style.display='block';
@@ -2110,7 +2194,7 @@ document.getElementById('cancelBtn').onclick=()=>{
 };
 
 async function loadList(){
-  const r=await fetch('/countries?limit=100');
+  const r=await fetch('/api/v1/countries?limit=100');
   if(!r.ok)return;
   const j=await r.json();
   const list=document.getElementById('list');
@@ -2133,7 +2217,7 @@ async function loadList(){
     a.onclick=async e=>{
       e.preventDefault();
       if(!confirm('Delete this country?'))return;
-      const r=await fetch('/countries/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
+      const r=await fetch('/api/v1/countries/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
       if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
       document.getElementById('err').textContent='';
       loadList();
@@ -2180,7 +2264,7 @@ let editId=null;
 let countries=[];
 
 async function loadCountries(){
-  const r=await fetch('/countries?limit=100');
+  const r=await fetch('/api/v1/countries?limit=100');
   if(!r.ok)return;
   const j=await r.json();
   countries=j.data;
@@ -2204,7 +2288,7 @@ document.getElementById('createBtn').onclick=async()=>{
   const name=document.getElementById('cityName').value.trim();
   const countryId=document.getElementById('countrySelect').value;
   if(!name||!countryId)return;
-  const r=await fetch('/cities',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name,countryId})});
+  const r=await fetch('/api/v1/cities',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name,countryId})});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
   document.getElementById('cityName').value='';
   document.getElementById('err').textContent='';
@@ -2215,7 +2299,7 @@ document.getElementById('saveBtn').onclick=async()=>{
   const name=document.getElementById('editName').value.trim();
   const countryId=document.getElementById('editCountrySelect').value;
   if(!name||!countryId||!editId)return;
-  const r=await fetch('/cities/'+editId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name,countryId})});
+  const r=await fetch('/api/v1/cities/'+editId,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},body:JSON.stringify({name,countryId})});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
   document.getElementById('editForm').style.display='none';
   document.getElementById('createForm').style.display='block';
@@ -2232,7 +2316,7 @@ document.getElementById('cancelBtn').onclick=()=>{
 
 async function loadList(){
   const countryId=document.getElementById('filterCountry').value;
-  let url='/cities?limit=100';
+  let url='/api/v1/cities?limit=100';
   if(countryId)url+='&countryId='+countryId;
   const r=await fetch(url);
   if(!r.ok)return;
@@ -2258,7 +2342,7 @@ async function loadList(){
     a.onclick=async e=>{
       e.preventDefault();
       if(!confirm('Delete this city?'))return;
-      const r=await fetch('/cities/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
+      const r=await fetch('/api/v1/cities/'+a.dataset.id,{method:'DELETE',headers:{'Authorization':'Bearer '+t}});
       if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
       document.getElementById('err').textContent='';
       loadList();
@@ -2310,7 +2394,7 @@ function esc(s){const d=document.createElement('div');d.textContent=s;return d.i
 let editId=null;
 
 async function loadCities(){
-  const r=await fetch('/cities?limit=100');
+  const r=await fetch('/api/v1/cities?limit=100');
   if(!r.ok)return;
   const j=await r.json();
   for(const sel of [document.getElementById('citySelect'),document.getElementById('editCitySelect'),document.getElementById('filterCity')]){
@@ -2370,7 +2454,7 @@ document.getElementById('cancelBtn').onclick=()=>{
 
 async function loadList(){
   const cityId=document.getElementById('filterCity').value;
-  let url='/places?limit=100';
+  let url='/api/v1/places?limit=100';
   if(cityId)url+='&cityId='+cityId;
   const r=await fetch(url);
   if(!r.ok)return;
@@ -2457,7 +2541,7 @@ Password<br><input type="password" name="password" required><br>
 document.getElementById('f').onsubmit=async e=>{
   e.preventDefault();
   const d=Object.fromEntries(new FormData(e.target));
-  const r=await fetch('/enter',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});
+  const r=await fetch('/api/v1/enter',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
   const j=await r.json();
   localStorage.setItem('accessToken',j.accessToken);
@@ -2488,7 +2572,7 @@ Role<br><select name="role"><option value="member">Member</option><option value=
 document.getElementById('f').onsubmit=async e=>{
   e.preventDefault();
   const d=Object.fromEntries(new FormData(e.target));
-  const r=await fetch('/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});
+  const r=await fetch('/api/v1/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});
   if(!r.ok){const j=await r.json();document.getElementById('err').textContent=j.code||JSON.stringify(j);return}
   document.getElementById('err').textContent='';
   window.location.href='/login';
