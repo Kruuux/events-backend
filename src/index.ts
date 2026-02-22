@@ -1670,12 +1670,20 @@ app.delete('/api/v1/events/:id', async (req: Request, res: Response) => {
 
 // --- pages ---
 
-const PAGE_STYLE = `*{margin:0;padding:0;box-sizing:border-box}body{background:#fff;color:#000;font-family:monospace;font-size:16px}.c{max-width:1000px;margin:0 auto;padding:24px 16px}a{color:#000}nav{margin:8px 0 16px}hr{border:none;border-top:1px solid #000;margin:16px 0}input,select{border:1px solid #000;padding:6px;margin:4px 0 12px;width:100%;font-family:monospace;font-size:16px}button{border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer}#err{font-weight:bold;margin-top:12px}.dropdown{border:1px solid #000;max-height:150px;overflow-y:auto;display:none}.dropdown div{padding:4px 6px;cursor:pointer}.dropdown div:hover{background:#000;color:#fff}`;
+const PAGE_STYLE = `*{margin:0;padding:0;box-sizing:border-box}body{background:#fff;color:#000;font-family:monospace;font-size:16px}.c{max-width:1000px;margin:0 auto;padding:24px 16px}a{color:#000}nav{margin:8px 0 16px}hr{border:none;border-top:1px solid #000;margin:16px 0}input,select{border:1px solid #000;padding:6px;margin:4px 0 12px;width:100%;font-family:monospace;font-size:16px}button{border:1px solid #000;background:#fff;color:#000;padding:6px 16px;font-family:monospace;font-size:16px;cursor:pointer}#err{font-weight:bold;margin-top:12px}.dropdown{border:1px solid #000;max-height:150px;overflow-y:auto;display:none}.dropdown div{padding:4px 6px;cursor:pointer}.dropdown div:hover{background:#000;color:#fff}.bc{margin:8px 0;font-size:14px}.searchRow{display:flex;align-items:center;gap:12px;margin-bottom:12px}.searchRow input{flex:1;margin-bottom:0}`;
 const PAGE_HEAD = `<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${PAGE_STYLE}</style>`;
 const NAV_SCRIPT = `<script>
 (function(){const t=localStorage.getItem('accessToken');if(!t)return;
 try{const p=JSON.parse(atob(t.split('.')[1]));
-if(p.role==='admin'){const s=document.getElementById('adminNav');if(s)s.style.display='inline'}}catch{}})();
+if(p.role==='admin'){const s=document.getElementById('adminNav');if(s)s.style.display='inline'}}catch{};
+const ph=window.location.pathname;let ah='/';
+if(ph==='/organisations-list'||ph.startsWith('/view/organisation/')||ph.startsWith('/edit/organisation/'))ah='/organisations-list';
+else if(ph==='/places-list'||ph.startsWith('/view/place/'))ah='/places-list';
+else if(ph==='/countries-list')ah='/countries-list';
+else if(ph==='/cities-list')ah='/cities-list';
+else if(ph==='/profile')ah='/profile';
+document.querySelectorAll('nav a').forEach(function(a){if(a.getAttribute('href')===ah)a.style.fontWeight='bold'});
+})();
 </script>`;
 const APP_NAV = `<nav>[<a href="/">Events</a>] [<a href="/organisations-list">Organisations</a>] [<a href="/places-list">Places</a>] <span id="adminNav" style="display:none">[<a href="/countries-list">Countries</a>] [<a href="/cities-list">Cities</a>] </span>[<a href="/profile">Profile</a>]</nav>${NAV_SCRIPT}`;
 
@@ -1751,6 +1759,7 @@ ${ORG_SEARCH_HTML}<br>
 <p id="err"></p>
 <hr>
 </div>
+<p class="bc">Events /</p>
 <input type="text" id="searchInput" placeholder="Search events..." style="margin-bottom:12px">
 <p id="toggle"><b>list</b> | <a href="#" id="toMap">map</a></p>
 <div id="listView">
@@ -1950,9 +1959,9 @@ function switchToList(e){
 
 app.get('/organisations-list', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>
-<html><head><title>Organisations</title>${PAGE_HEAD}<style>#end{display:none}</style></head><body>
+<html><head><title>Events</title>${PAGE_HEAD}<style>#end{display:none}</style></head><body>
 <div class="c">
-<h1>Organisations</h1>
+<h1>Events</h1>
 ${APP_NAV}
 <hr>
 <div id="createForm" style="display:none">
@@ -1962,8 +1971,9 @@ ${APP_NAV}
 <p id="err"></p>
 <hr>
 </div>
-<input type="text" id="searchInput" placeholder="Search organisations..." style="margin-bottom:12px">
-<p id="favToggle"><a href="#" id="favLink">[Show favourites]</a></p>
+<p class="bc">Organisations /</p>
+<div class="searchRow"><input type="text" id="searchInput" placeholder="Search organisations...">
+<a href="#" id="favLink">[Show favourites]</a></div>
 <div id="list"></div>
 <p id="loading">Loading...</p>
 <p id="end">---</p>
@@ -2028,7 +2038,7 @@ async function load(){
     const dv=document.createElement('div');
     let oHtml='<a href="/view/organisation/'+o.id+'"><b>'+esc(o.name)+'</b></a>';
     if(me.role==='admin')oHtml+=' <a href="/edit/organisation/'+o.id+'">[edit]</a> <a href="#" class="delOrg" data-id="'+o.id+'">[delete]</a>';
-    oHtml+=' <a href="#" class="favOrg" data-id="'+o.id+'" data-fav="'+o.isFavourite+'">'+(o.isFavourite?'[Remove from favourites]':'[Add to favourites]')+'</a>';
+    oHtml+=' <a href="#" class="favOrg" style="float:right" data-id="'+o.id+'" data-fav="'+o.isFavourite+'">'+(o.isFavourite?'[Remove from favourites]':'[Add to favourites]')+'</a>';
     oHtml+='<hr>';
     dv.innerHTML=oHtml;
     list.appendChild(dv);
@@ -2071,11 +2081,12 @@ load();
 
 app.get('/view/event/:id', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>
-<html><head><title>Event</title>${PAGE_HEAD}</head><body>
+<html><head><title>Events</title>${PAGE_HEAD}</head><body>
 <div class="c">
-<h1 id="title">Event</h1>
+<h1>Events</h1>
 ${APP_NAV}
 <hr>
+<p class="bc" id="bc"><a href="/">Events</a> /</p>
 <div id="detail"></div>
 <p id="err"></p>
 </div>
@@ -2089,8 +2100,8 @@ try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
   const r=await fetch('/api/v1/events/'+id,{headers:{'Authorization':'Bearer '+t}});
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const ev=await r.json();
-  document.getElementById('title').textContent=ev.title;
-  let html='<p>'+esc(ev.description)+'</p>'
+  document.getElementById('bc').innerHTML='<a href="/">Events</a> / '+esc(ev.title);
+  let html='<p>Description: '+esc(ev.description)+'</p>'
     +'<p>Place: <a href="/view/place/'+ev.placeId+'">'+esc(ev.placeName)+'</a> - '+esc(ev.placeAddress)+'</p>'
     +'<p>Start: '+new Date(ev.startDate).toLocaleString()+'</p>'
     +'<p>End: '+new Date(ev.endDate).toLocaleString()+'</p>';
@@ -2118,15 +2129,16 @@ function esc(s){const d=document.createElement('div');d.textContent=s;return d.i
 
 app.get('/view/organisation/:id', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>
-<html><head><title>Organisation</title>${PAGE_HEAD}<style>#end{display:none}</style></head><body>
+<html><head><title>Events</title>${PAGE_HEAD}<style>#end{display:none}</style></head><body>
 <div class="c">
-<h1 id="title">Organisation</h1>
+<h1>Events</h1>
 ${APP_NAV}
 <hr>
+<p class="bc" id="bc"><a href="/organisations-list">Organisations</a> /</p>
 <div id="detail"></div>
 <p id="err"></p>
 <div id="eventsSection" style="display:none">
-<h2 style="margin:24px 0 12px">Events</h2>
+<h2 id="eventsTitle" style="margin:24px 0 12px">Events</h2>
 <div id="list"></div>
 <p id="loading">Loading...</p>
 <p id="end">---</p>
@@ -2142,10 +2154,11 @@ try{me=JSON.parse(atob(t.split('.')[1]))}catch{}
   const r=await fetch('/api/v1/organisations/'+id,{headers:{'Authorization':'Bearer '+t}});
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const o=await r.json();
-  document.getElementById('title').textContent=o.name;
-  let html='<p>Name: '+esc(o.name)+'</p>';
+  document.getElementById('bc').innerHTML='<a href="/organisations-list">Organisations</a> / '+esc(o.name);
+  document.getElementById('eventsTitle').textContent='Events of '+o.name;
+  let html='';
   if(me.role==='admin'){
-    html+='<br><a href="/edit/organisation/'+o.id+'">[edit]</a>';
+    html+='<a href="/edit/organisation/'+o.id+'">[edit]</a>';
     html+=' <a href="#" id="deleteBtn">[delete]</a>';
   }
   document.getElementById('detail').innerHTML=html;
@@ -2210,15 +2223,16 @@ window.addEventListener('scroll',()=>{
 
 app.get('/view/place/:id', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>
-<html><head><title>Place</title>${PAGE_HEAD}<style>#end{display:none}</style></head><body>
+<html><head><title>Events</title>${PAGE_HEAD}<style>#end{display:none}</style></head><body>
 <div class="c">
-<h1 id="title">Place</h1>
+<h1>Events</h1>
 ${APP_NAV}
 <hr>
+<p class="bc" id="bc"><a href="/places-list">Places</a> /</p>
 <div id="detail"></div>
 <p id="err"></p>
 <div id="eventsSection" style="display:none">
-<h2 style="margin:24px 0 12px">Events</h2>
+<h2 id="eventsTitle" style="margin:24px 0 12px">Events</h2>
 <div id="list"></div>
 <p id="loading">Loading...</p>
 <p id="end">---</p>
@@ -2232,7 +2246,8 @@ const id=window.location.pathname.split('/').pop();
   const r=await fetch('/api/v1/places/'+id,{headers:{'Authorization':'Bearer '+t}});
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const p=await r.json();
-  document.getElementById('title').textContent=p.name;
+  document.getElementById('bc').innerHTML='<a href="/places-list">Places</a> / '+esc(p.name);
+  document.getElementById('eventsTitle').textContent='Events in '+p.name;
   let html='<p>Address: '+esc(p.countryName)+', '+esc(p.cityName)+', '+esc(p.address)+'</p>'
     +'<p>Coordinates: '+p.latitude+', '+p.longitude+'</p>';
   document.getElementById('detail').innerHTML=html;
@@ -2290,11 +2305,12 @@ window.addEventListener('scroll',()=>{
 
 app.get('/edit/event/:id', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>
-<html><head><title>Edit event</title>${PAGE_HEAD}</head><body>
+<html><head><title>Events</title>${PAGE_HEAD}</head><body>
 <div class="c">
-<h1>Edit event</h1>
+<h1>Events</h1>
 ${APP_NAV}
 <hr>
+<p class="bc" id="bc"><a href="/">Events</a> /</p>
 <form id="f">
 Title<br><input type="text" name="title" required><br>
 Description<br><input type="text" name="description" required><br>
@@ -2317,6 +2333,8 @@ ${ORG_SEARCH_SCRIPT}
   const r=await fetch('/api/v1/events/'+eventId,{headers:{'Authorization':'Bearer '+_t}});
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const ev=await r.json();
+  function _esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+  document.getElementById('bc').innerHTML='<a href="/">Events</a> / <a href="/view/event/'+eventId+'">'+_esc(ev.title)+'</a> / Edit';
   const f=document.getElementById('f');
   f.title.value=ev.title;
   f.description.value=ev.description;
@@ -2349,11 +2367,12 @@ document.getElementById('f').onsubmit=async e=>{
 
 app.get('/edit/organisation/:id', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>
-<html><head><title>Edit organisation</title>${PAGE_HEAD}</head><body>
+<html><head><title>Events</title>${PAGE_HEAD}</head><body>
 <div class="c">
-<h1>Edit organisation</h1>
+<h1>Events</h1>
 ${APP_NAV}
 <hr>
+<p class="bc" id="bc"><a href="/organisations-list">Organisations</a> /</p>
 <form id="f">
 Name<br><input type="text" name="name" minlength="1" maxlength="256" required><br><br>
 <button type="submit">Update</button>
@@ -2368,6 +2387,8 @@ const orgId=window.location.pathname.split('/').pop();
   const r=await fetch('/api/v1/organisations/'+orgId,{headers:{'Authorization':'Bearer '+localStorage.getItem('accessToken')}});
   if(!r.ok){document.getElementById('err').textContent='Not found';return}
   const o=await r.json();
+  function _esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+  document.getElementById('bc').innerHTML='<a href="/organisations-list">Organisations</a> / <a href="/view/organisation/'+orgId+'">'+_esc(o.name)+'</a> / Edit';
   document.getElementById('f').name.value=o.name;
 })();
 document.getElementById('f').onsubmit=async e=>{
@@ -2385,11 +2406,12 @@ document.getElementById('f').onsubmit=async e=>{
 
 app.get('/countries-list', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>
-<html><head><title>Countries</title>${PAGE_HEAD}</head><body>
+<html><head><title>Events</title>${PAGE_HEAD}</head><body>
 <div class="c">
-<h1>Countries</h1>
+<h1>Events</h1>
 ${APP_NAV}
 <hr>
+<p class="bc">Countries /</p>
 <div id="createForm">
 <b>Add country</b><br>
 <input type="text" id="countryName" placeholder="Country name" required>
@@ -2478,11 +2500,12 @@ loadList();
 
 app.get('/cities-list', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>
-<html><head><title>Cities</title>${PAGE_HEAD}</head><body>
+<html><head><title>Events</title>${PAGE_HEAD}</head><body>
 <div class="c">
-<h1>Cities</h1>
+<h1>Events</h1>
 ${APP_NAV}
 <hr>
+<p class="bc">Cities /</p>
 <div id="createForm">
 <b>Add city</b><br>
 Name<br><input type="text" id="cityName" placeholder="City name" required><br>
@@ -2603,9 +2626,9 @@ loadCountries().then(()=>loadList());
 
 app.get('/places-list', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>
-<html><head><title>Places</title>${PAGE_HEAD}<style>#end{display:none}</style></head><body>
+<html><head><title>Events</title>${PAGE_HEAD}<style>#end{display:none}</style></head><body>
 <div class="c">
-<h1>Places</h1>
+<h1>Events</h1>
 ${APP_NAV}
 <hr>
 <div id="createForm" style="display:none">
@@ -2628,8 +2651,9 @@ City<br><select id="editCitySelect"><option value="">-- select --</option></sele
 </div>
 <p id="err"></p>
 <hr>
-<input type="text" id="searchInput" placeholder="Search places..." style="margin-bottom:12px">
-<p id="favToggle"><a href="#" id="favLink">[Show favourites]</a></p>
+<p class="bc">Places /</p>
+<div class="searchRow"><input type="text" id="searchInput" placeholder="Search places...">
+<a href="#" id="favLink">[Show favourites]</a></div>
 <div id="list"></div>
 <p id="loading">Loading...</p>
 <p id="end">---</p>
@@ -2752,7 +2776,7 @@ async function load(){
       pHtml+=' <a href="#" class="edit" data-id="'+p.id+'" data-name="'+esc(p.name)+'" data-address="'+esc(p.address)+'" data-lat="'+p.latitude+'" data-lng="'+p.longitude+'" data-city="'+p.cityId+'">[edit]</a>'
         +' <a href="#" class="del" data-id="'+p.id+'">[delete]</a>';
     }
-    pHtml+=' <a href="#" class="favPlace" data-id="'+p.id+'" data-fav="'+p.isFavourite+'">'+(p.isFavourite?'[Remove from favourites]':'[Add to favourites]')+'</a>';
+    pHtml+=' <a href="#" class="favPlace" style="float:right" data-id="'+p.id+'" data-fav="'+p.isFavourite+'">'+(p.isFavourite?'[Remove from favourites]':'[Add to favourites]')+'</a>';
     pHtml+='<hr>';
     d.innerHTML=pHtml;
     list.appendChild(d);
@@ -2808,11 +2832,12 @@ load();
 
 app.get('/profile', (_req: Request, res: Response) => {
   res.type('html').send(`<!DOCTYPE html>
-<html><head><title>Profile</title>${PAGE_HEAD}</head><body>
+<html><head><title>Events</title>${PAGE_HEAD}</head><body>
 <div class="c">
-<h1>Profile</h1>
+<h1>Events</h1>
 ${APP_NAV}
 <hr>
+<p class="bc">Profile /</p>
 <p>Nickname: <b id="nick"></b></p>
 <p>Email: <b id="email"></b> <small>(visible only to you)</small></p>
 <br>
