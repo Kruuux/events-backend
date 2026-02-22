@@ -249,6 +249,34 @@ app.post('/api/v1/refresh', async (req: Request, res: Response) => {
   res.status(200).json({ accessToken, refreshToken });
 });
 
+const LogoutSchema = v.object({
+  refreshToken: v.string(),
+});
+
+app.post('/api/v1/logout', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+
+  const data = validate(LogoutSchema, req.body, res);
+  if (!data) return;
+
+  const tokenHash = hashToken(data.refreshToken);
+  const result = await pool.query(
+    'DELETE FROM sessions WHERE token_hash = $1 AND human_id = $2',
+    [tokenHash, payload.sub],
+  );
+
+  if (result.rowCount === 0) {
+    res.status(404).json({ code: 'SESSION_NOT_FOUND_EXCEPTION' });
+    return;
+  }
+
+  res.status(200).end();
+});
+
 app.post('/api/v1/logout-all', async (req: Request, res: Response) => {
   const payload = authenticate(req);
   if (!payload) {
