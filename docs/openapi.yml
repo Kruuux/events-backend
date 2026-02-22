@@ -239,7 +239,9 @@ paths:
                 code: LANGUAGE_CODE_ALREADY_EXISTS_EXCEPTION
 
     get:
-      summary: List all languages (public, no auth required)
+      summary: List all languages
+      security:
+        - bearerAuth: []
       responses:
         "200":
           description: Array of languages

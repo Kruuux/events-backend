@@ -868,7 +868,13 @@ app.post('/api/v1/languages', async (req: Request, res: Response) => {
   res.status(201).json(row.rows[0]);
 });
 
-app.get('/api/v1/languages', async (_req: Request, res: Response) => {
+app.get('/api/v1/languages', async (req: Request, res: Response) => {
+  const payload = authenticate(req);
+  if (!payload) {
+    res.status(401).json({ code: 'UNAUTHORIZED_EXCEPTION' });
+    return;
+  }
+
   const rows = await pool.query(
     'SELECT id, code, name FROM languages ORDER BY code ASC',
   );
@@ -2642,8 +2648,9 @@ cityInput.onblur=function(){
 </script>`;
 const LANG_PICKER_SCRIPT = `<script>
 (function(){
+  var t=localStorage.getItem('accessToken');if(!t)return;
   var sel=document.getElementById('langSelect');if(!sel)return;
-  fetch('/api/v1/languages').then(function(r){return r.json()}).then(function(langs){
+  fetch('/api/v1/languages',{headers:{'Authorization':'Bearer '+t}}).then(function(r){return r.json()}).then(function(langs){
     if(!Array.isArray(langs)||langs.length===0)return;
     sel.innerHTML='';
     for(var i=0;i<langs.length;i++){
@@ -4229,7 +4236,7 @@ app.get('/login', (_req: Request, res: Response) => {
 <html><head><title>Login</title>${PAGE_HEAD}</head><body>
 <div class="c">
 <h1>Login</h1>
-<nav style="display:flex;align-items:center;gap:8px"><a href="/signup" class="btn">Sign up</a><select id="langSelect"></select></nav>
+<nav style="display:flex;align-items:center;gap:8px"><a href="/signup" class="btn">Sign up</a><select id="langSelect"><option value="en">EN</option><option value="pl">PL</option></select></nav>
 <hr>
 <form id="f">
 Email<br><input type="email" name="email" required><br>
@@ -4238,7 +4245,15 @@ Password<br><input type="password" name="password" required><br>
 </form>
 <p id="err"></p>
 </div>
-${LANG_PICKER_SCRIPT}
+<script>
+(function(){
+  var sel=document.getElementById('langSelect');
+  var saved=localStorage.getItem('selectedLanguage');
+  if(saved&&(saved==='en'||saved==='pl'))sel.value=saved;
+  else{localStorage.setItem('selectedLanguage','en')}
+  sel.onchange=function(){localStorage.setItem('selectedLanguage',this.value);window.location.reload()};
+})();
+</script>
 <script>
 document.getElementById('f').onsubmit=async e=>{
   e.preventDefault();
@@ -4259,7 +4274,7 @@ app.get('/signup', (_req: Request, res: Response) => {
 <html><head><title>Sign up</title>${PAGE_HEAD}</head><body>
 <div class="c">
 <h1>Sign up</h1>
-<nav style="display:flex;align-items:center;gap:8px"><a href="/login" class="btn">Log in</a><select id="langSelect"></select></nav>
+<nav style="display:flex;align-items:center;gap:8px"><a href="/login" class="btn">Log in</a><select id="langSelect"><option value="en">EN</option><option value="pl">PL</option></select></nav>
 <hr>
 <form id="f">
 Nickname<br><input type="text" name="nickname" minlength="2" maxlength="32" required><br>
@@ -4270,7 +4285,15 @@ Role<br><select name="role"><option value="member">Member</option><option value=
 </form>
 <p id="err"></p>
 </div>
-${LANG_PICKER_SCRIPT}
+<script>
+(function(){
+  var sel=document.getElementById('langSelect');
+  var saved=localStorage.getItem('selectedLanguage');
+  if(saved&&(saved==='en'||saved==='pl'))sel.value=saved;
+  else{localStorage.setItem('selectedLanguage','en')}
+  sel.onchange=function(){localStorage.setItem('selectedLanguage',this.value);window.location.reload()};
+})();
+</script>
 <script>
 document.getElementById('f').onsubmit=async e=>{
   e.preventDefault();
